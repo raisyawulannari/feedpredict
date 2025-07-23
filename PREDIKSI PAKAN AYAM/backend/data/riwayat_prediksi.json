@@ -1,0 +1,232 @@
+[
+  {
+    "timestamp": "2025-07-16 02:40:46",
+    "jumlah_periode": 40,
+    "order": [
+      2,
+      1,
+      2
+    ],
+    "periode_total": [
+      0.95
+    ]
+  },
+  {
+    "timestamp": "2025-07-16 02:40:58",
+    "jumlah_periode": 38,
+    "order": [
+      2,
+      1,
+      2
+    ],
+    "periode_total": [
+      0.89
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:43:39.668Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-08-15",
+    "jumlah_hari": 46,
+    "total_kg": 1.1,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:43:58.313Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-08-08",
+    "jumlah_hari": 39,
+    "total_kg": 0.92,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:44:10.427Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-16",
+    "jumlah_hari": 16,
+    "total_kg": 0.35,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:46:15.612Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-16",
+    "jumlah_hari": 16,
+    "total_kg": 0.35,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:46:34.016Z",
+    "mode": "per_ayam",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-16",
+    "jumlah_hari": 16,
+    "total_kg": 320,
+    "order": null
+  },
+  {
+    "timestamp": "2025-07-15T19:46:59.654Z",
+    "mode": "per_ayam",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-16",
+    "jumlah_hari": 16,
+    "total_kg": 320,
+    "order": null
+  },
+  {
+    "timestamp": "2025-07-15T19:47:14.410Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-17",
+    "jumlah_hari": 17,
+    "total_kg": 0.36,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:47:39.294Z",
+    "mode": "per_ayam",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-12",
+    "jumlah_hari": 12,
+    "total_kg": 240,
+    "order": null
+  },
+  {
+    "timestamp": "2025-07-15T19:48:29.142Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-12",
+    "jumlah_hari": 12,
+    "total_kg": 0.24,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:50:23.628Z",
+    "mode": "per_ayam",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-12",
+    "jumlah_hari": 12,
+    "total_kg": 240,
+    "order": null
+  },
+  {
+    "timestamp": "2025-07-15T19:50:43.241Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-12",
+    "jumlah_hari": 12,
+    "total_kg": 0.24,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:54:33.437Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-16",
+    "jumlah_hari": 16,
+    "total_kg": 0.35,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T19:54:48.962Z",
+    "mode": "per_ayam",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-16",
+    "jumlah_hari": 16,
+    "total_kg": 320,
+    "order": null
+  },
+  {
+    "timestamp": "2025-07-15T19:59:00.255Z",
+    "mode": "per_ayam",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-16",
+    "jumlah_hari": 16,
+    "total_kg": 320,
+    "order": null
+  },
+  {
+    "timestamp": "2025-07-15T20:00:39.372Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-02",
+    "tanggal_selesai": "2025-07-14",
+    "jumlah_hari": 13,
+    "total_kg": 0.25,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T20:00:47.650Z",
+    "mode": "per_ayam",
+    "tanggal_mulai": "2025-07-02",
+    "tanggal_selesai": "2025-07-14",
+    "jumlah_hari": 13,
+    "total_kg": 260,
+    "order": null
+  },
+  {
+    "timestamp": "2025-07-15T20:03:03.119Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-23",
+    "jumlah_hari": 23,
+    "total_kg": 0.52,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  },
+  {
+    "timestamp": "2025-07-15T20:03:25.437Z",
+    "mode": "per_hari",
+    "tanggal_mulai": "2025-07-01",
+    "tanggal_selesai": "2025-07-17",
+    "jumlah_hari": 17,
+    "total_kg": 0.36,
+    "order": [
+      2,
+      1,
+      2
+    ]
+  }
+]

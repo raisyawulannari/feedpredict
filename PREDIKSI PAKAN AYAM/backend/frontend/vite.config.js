@@ -1,20 +1,16 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import path from 'path'
 
 export default defineConfig({
-  base: '/',
   plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src')
+    }
+  },
   build: {
-    outDir: 'dist',
-    emptyOutDir: true,
-    // Hapus bagian external agar axios ikut di-bundle
-  },
-  optimizeDeps: {
-    include: ['axios', 'chart.js'],
-  },
-  server: {
-    proxy: {
-      '/api': 'http://localhost:8000',
-    },
+    outDir: '../static', // ⬅ build hasilnya ke backend/static/
+    emptyOutDir: true
   }
 })

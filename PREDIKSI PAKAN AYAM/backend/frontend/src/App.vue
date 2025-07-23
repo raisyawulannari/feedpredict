@@ -35,7 +35,7 @@
 }
 
 .logo img {
-  height: 60px;
+  height: 70px;
 }
 
 .nav-links {
@@ -55,10 +55,10 @@
 }
 
 .hallo-btn button {
-  padding: 10px 20px;
+  padding: 10px 10px;
   background-color: #d6d8aa;
   border: none;
-  border-radius: 20px;
+  border-radius: 10px;
   font-weight: bold;
   cursor: pointer;
 }
