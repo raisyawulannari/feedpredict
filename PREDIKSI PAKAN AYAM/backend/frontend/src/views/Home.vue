@@ -1,204 +1,223 @@
 <template>
-  <main class="main-content">
-    <div class="content-wrapper">
-      <h2 class="welcome">Selamat Datang di FEED PREDICT</h2>
-
-      <div class="hero-image">
-        <img src="../assets/home-ayam.jpg" alt="Ayam Peternakan" />
+  <div class="home-container">
+    <!-- Header dengan gambar full dan overlay teks -->
+    <div class="header-banner">
+      <img src="../assets/home-ayam.jpg" alt="Ayam Peternakan" class="banner-image" />
+      <div class="banner-overlay">
+        <h1>Selamat Datang di <span class="highlight">FEED PREDICT</span></h1>
       </div>
-
-                  
-      <div class="scroll-indicator">⌄</div>
-
-      <div class="title">
-        <h2>Sistem Prediksi Kebutuhan Pakan</h2>
-        <h3 class="highlight">Ayam Pedaging Berbasis ARIMA</h3>
-      </div>
-
-      <p class="subtitle">
-        “Untuk membantu perencanaan pakan secara lebih akurat dan efisien”
-      </p>
-      
-
-
-      <!-- CTA Button -->
-      <div class="cta-button">
-        <router-link to="/prediksi" class="start-btn">Mulai Prediksi Sekarang</router-link>
-      </div>
-
-      
     </div>
 
-    <!-- ✨ Sekilas Fitur -->
-    <section class="features">
-      <h3>Fitur Utama Sistem</h3>
-      <div class="feature-cards">
-        <div class="card">
-          <h4>📈 Prediksi Pakan</h4>
-          <p>Prediksi kebutuhan pakan ayam berdasarkan data historis menggunakan ARIMA.</p>
-        </div>
-        <div class="card">
-          <h4>📊 Visualisasi Data</h4>
-          <p>Tampilan grafik interaktif untuk melihat tren penggunaan pakan.</p>
-        </div>
-        <div class="card">
-          <h4>🕓 Riwayat</h4>
-          <p>Menyimpan riwayat prediksi untuk referensi di masa depan.</p>
-        </div>
+    <!-- Tentang Feed Predict (Split 2 kolom) -->
+    <section class="about-section">
+      <div class="about-text">
+        <h2>📢 Apa Itu Feed Predict?</h2>
+        <p>
+          Feed Predict adalah aplikasi prediksi kebutuhan pakan ayam broiler menggunakan metode statistik ARIMA.
+          Dengan analisis data harian, aplikasi ini membantu peternak menentukan jumlah pakan optimal setiap hari,
+          menghindari pemborosan dan kekurangan pakan.
+        </p>
+        <ul>
+          <li>✔️ Efisiensi Pakan</li>
+          <li>✔️ Prediksi Akurat</li>
+          <li>✔️ Data Harian Otomatis</li>
+        </ul>
+      </div>
+      <div class="about-image">
+        <img src="../assets/home2.avif" alt="Ayam" />
       </div>
     </section>
 
-    <!-- 👣 Langkah Penggunaan -->
-    <section class="steps">
-      <h3>Cara Menggunakan Sistem</h3>
-      <ol>
-        <li>Buka halaman <strong>Prediksi</strong>.</li>
-        <li>Pilih jumlah periode yang ingin diprediksi.</li>
-        <li>Pilih tipe grafik dan klik "Tampilkan Prediksi".</li>
-        <li>Lihat hasil prediksi dan simpan jika diperlukan.</li>
-      </ol>
+    <!-- Info ARIMA dalam kotak hijau -->
+    <section class="arima-info">
+      <h2>📊 Apa Itu Metode ARIMA?</h2>
+      <p>
+        ARIMA (Autoregressive Integrated Moving Average) adalah metode statistik untuk memprediksi data berdasarkan tren historis.
+        Feed Predict menggunakan ARIMA untuk menghitung kebutuhan pakan harian ayam broiler berdasarkan pola konsumsi sebelumnya.
+      </p>
     </section>
 
-    <!-- 📞 Footer -->
-    <footer class="footer">
-      <p>📧 Kontak: feedpredict@example.com | &copy; 2025 FeedPredict</p>
-    </footer>
-  </main>
+    <!-- Map Lokasi -->
+    <section class="location-map">
+      <h2>📍 Lokasi Peternakan</h2>
+      <p>🗺️ Batipuh Panjang, Kec. Koto Tangah, Kota Padang, Sumatera Barat 25586</p>
+      <div id="map"></div>
+    </section>
+  </div>
 </template>
 
 <script setup>
-// Tidak ada logic yang diperlukan di sini
+import { onMounted } from 'vue'
+import L from 'leaflet'
+
+onMounted(() => {
+  const lat = -0.8166961887713797
+  const lng = 100.33174055209342
+
+  const map = L.map('map', {
+    attributionControl: false,
+    zoomControl: true,
+  }).setView([lat, lng], 13)
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map)
+
+  const marker = L.marker([lat, lng]).addTo(map)
+  marker.bindPopup(`
+    <b>📍 Peternakan Ayam Broiler</b><br>
+    <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" style="color:#007bff;text-decoration:underline">
+      Buka di Google Maps
+    </a>
+  `).openPopup()
+
+  map.on('click', (e) => {
+    const { lat, lng } = e.latlng
+    marker.setLatLng([lat, lng])
+    marker.bindPopup(`
+      📍 Lokasi Baru<br>
+      <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" style="color:#007bff;text-decoration:underline">
+        Buka di Google Maps
+      </a>
+    `).openPopup()
+  })
+
+  setTimeout(() => {
+    map.invalidateSize()
+  }, 300)
+})
 </script>
 
 <style scoped>
-.main-content {
+.home-container {
+  font-family: 'Segoe UI', sans-serif;
+  color: #333;
+}
+
+/* Header full dengan overlay */
+.header-banner {
+  position: relative;
   width: 100%;
+  height: 300px;
+  overflow: hidden;
+}
+
+.banner-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(70%);
+}
+
+.banner-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: white;
+  text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.8);
+  font-size: 1.8rem;
+}
+
+.highlight {
+  color: #3e8a0b;
+  font-weight: bold;
+}
+
+/* Tentang Feed Predict (split 2) */
+.about-section {
   display: flex;
   flex-direction: column;
+  gap: 20px;
+  padding: 30px 20px;
+}
+
+.about-text {
+  flex: 1;
+}
+
+.about-text h2 {
+  color: #3e8a0b;
+  margin-bottom: 10px;
+}
+
+.about-text p {
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.about-text ul {
+  margin-top: 10px;
+  list-style: none;
+  padding-left: 0;
+}
+
+.about-text li {
+  margin-bottom: 5px;
+  font-size: 0.95rem;
+}
+
+.about-image {
+  flex: 1;
+  display: flex;
+  justify-content: center;
   align-items: center;
 }
-.content-wrapper {
-  max-width: 800px;
-  width: 100%;
-  text-align: center;
-}
-.hero-image img {
-  width: 100%;
-  max-width: 600px;
+
+.about-image img {
+  width: 80%;         /* <= skala gambar agar tidak penuh */
+  max-width: 400px;   /* <= batasi ukuran maksimal */
   height: auto;
-  margin: 2rem auto;
-  display: block;
-  border-radius: 8px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
-.welcome {
-  font-weight: bold;
-  color: #5d2d1d;
-  margin-top: 1rem;
-}
-.title h2 {
-  font-size: 2rem;
-  color: #5d2d1d;
-  margin-top: 1rem;
-}
-.highlight {
-  font-size: 1.5rem;
-  color: #7ca221;
-}
-.subtitle {
-  font-style: italic;
-  font-size: 1rem;
-  color: #333;
-  margin-top: 1rem;
-}
-.scroll-indicator {
-  font-size: 2rem;
-  margin-top: 1rem;
-  animation: bounce 2s infinite;
-}
-@keyframes bounce {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(8px);
+
+
+/* Responsive split */
+@media (min-width: 768px) {
+  .about-section {
+    flex-direction: row;
   }
 }
 
-/* CTA Button */
-.cta-button {
-  margin-top: 1.5rem;
-}
-.start-btn {
-  display: inline-block;
-  background-color: #7ca221;
+/* ARIMA Info Box */
+.arima-info {
+  background-color: #3e8a0b;
   color: white;
-  padding: 10px 20px;
-  font-weight: bold;
-  border-radius: 8px;
-  text-decoration: none;
-}
-.start-btn:hover {
-  background-color: #659117;
-}
-
-/* Fitur Section */
-.features {
-  margin-top: 3rem;
+  padding: 30px 20px;
   text-align: center;
-}
-.features h3 {
-  margin-bottom: 1rem;
-  font-size: 1.6rem;
-}
-.feature-cards {
-  display: flex;
-  gap: 1.5rem;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-.card {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 1rem;
-  max-width: 240px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-  background-color: #f9fafb;
-}
-.card h4 {
-  margin-bottom: 0.5rem;
-  color: #1f2937;
-}
-.card p {
-  font-size: 0.9rem;
-  color: #4b5563;
+  margin-top: 30px;
 }
 
-/* Langkah Section */
-.steps {
-  margin: 3rem auto;
-  max-width: 700px;
-  text-align: left;
+.arima-info h2 {
+  margin-bottom: 15px;
 }
-.steps h3 {
-  font-size: 1.5rem;
-  margin-bottom: 1rem;
-}
-.steps ol {
-  padding-left: 1.2rem;
-}
-.steps li {
-  margin-bottom: 0.75rem;
+
+.arima-info p {
   font-size: 1rem;
+  line-height: 1.5;
+  max-width: 800px;
+  margin: auto;
 }
 
-/* Footer */
-.footer {
-  text-align: center;
-  margin-top: 3rem;
-  padding: 1rem;
-  font-size: 0.9rem;
-  background-color: #f3f4f6;
-  color: #4b5563;
+/* Map */
+.location-map {
+  padding: 30px 20px;
+  margin-top: 30px;
+}
+
+#map {
+  height: 300px;
+  width: 100%;
+  margin-top: 15px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Hilangkan OpenStreetMap attribution */
+.leaflet-control-attribution {
+  display: none !important;
 }
 </style>

@@ -1,152 +1,193 @@
-
 <template>
   <div class="container">
-    <h1 class="title">Riwayat Prediksi</h1>
+    <h1 class="title">Riwayat Prediksi Pakan Ayam</h1>
 
-    <div v-if="riwayat.length === 0" class="empty">
-      Belum ada riwayat prediksi.
-    </div>
+    <button v-if="riwayat.length" @click="hapusSemua" class="btn-hapus">Hapus Semua</button>
 
-    <table v-else class="riwayat-table">
+    <table class="riwayat-table">
       <thead>
         <tr>
           <th>No</th>
-          <th>Tanggal Prediksi</th>
-          <th>Mode</th>
-          <th>Tanggal Awal</th>
-          <th>Tanggal Akhir</th>
-          <th>Jumlah Hari</th>
-          <th>Total (kg)</th>
-          <th>ARIMA</th>
+          <th>Tanggal</th>
+          <th>Durasi (Hari)</th>
+          <th>Prediksi Pakan</th>
+          <th>MAPE</th>
+          <th>Asal Data</th> 
+          <th>Nama File</th> 
           <th>Aksi</th>
         </tr>
       </thead>
       <tbody>
+        <tr v-if="riwayat.length === 0">
+          <td colspan="7" class="text-center">Belum ada data riwayat.</td>
+        </tr>
         <tr v-for="(item, index) in riwayat" :key="index">
-          <td>{{ index + 1 }}</td>
-          <td>{{ formatDate(item.timestamp) }}</td>
-          <td>{{ item.mode }}</td>
-          <td>{{ item.tanggal_mulai }}</td>
-          <td>{{ item.tanggal_selesai }}</td>
-          <td>{{ item.jumlah_hari }}</td>
-          <td>{{ item.total_kg.toFixed(2) }} kg</td>
-          <td>{{ item.order ? '(' + item.order.join(',') + ')' : '-' }}</td>
+          <td class="text-center">{{ index + 1 }}</td>
+          <td class="text-center">{{ item.tanggal }}</td>
+          <td class="text-center">{{ item.durasi ?? '-' }} hari</td>
+          <td class="text-center">{{ formatAngka(item.prediksiPakan) }} kg</td>
+            <td class="text-center" :class="mapeClass(item.mape)">
+              {{ formatPersen(item.mape) }}
+            </td>
+          <td class="text-center">{{ formatAsalData(item.asalData) }}</td>
+          <td class="text-center">
+            {{ item.asalData === 'upload' ? item.namaFile : 'default' }}
+          </td>
           <td>
-            <button @click="lihat(item)">Lihat</button>
-            <button @click="hapus(index)">Hapus</button>
+            <div class="action-buttons">
+              <RouterLink :to="`/riwayat/${item.id || index}/grafik`" class="btn-detail">
+                Detail
+              </RouterLink>
+              <button @click="hapusItem(index)" class="btn-hapus-item">Hapus</button>
+            </div>
           </td>
         </tr>
       </tbody>
     </table>
-
-    <div v-if="terpilih" class="preview">
-      <h2>Detail Prediksi Terpilih</h2>
-      <p><strong>Tanggal Prediksi:</strong> {{ formatDate(terpilih.timestamp) }}</p>
-      <p><strong>Mode:</strong> {{ terpilih.mode }}</p>
-      <p><strong>Tanggal:</strong> {{ terpilih.tanggal_mulai }} → {{ terpilih.tanggal_selesai }}</p>
-      <p><strong>Total Prediksi:</strong> {{ terpilih.total_kg.toFixed(2) }} kg</p>
-      <p><strong>Jumlah Hari:</strong> {{ terpilih.jumlah_hari }}</p>
-      <p v-if="terpilih.order"><strong>ARIMA:</strong> ({{ terpilih.order.join(', ') }})</p>
-      <p v-if="terpilih.jumlah_ayam_awal">
-        <strong>Jumlah Ayam Awal (input):</strong> {{ terpilih.jumlah_ayam_awal }}
-      </p>
-    </div>
   </div>
 </template>
 
-<script>
-import axios from 'axios'
+<script setup>
+import { ref, onMounted } from 'vue'
+import { RouterLink } from 'vue-router'
 
-export default {
-  data() {
-    return {
-      riwayat: [],
-      terpilih: null,
-    }
-  },
-  created() {
-    this.ambilRiwayat()
-  },
-  methods: {
-    async ambilRiwayat() {
-      try {
-        const res = await axios.get('http://localhost:8000/riwayat')
-        this.riwayat = res.data.reverse() // tampilkan terbaru di atas
-      } catch (err) {
-        console.error('Gagal ambil riwayat:', err)
-        this.riwayat = []
-      }
-    },
-    lihat(item) {
-      this.terpilih = item
-    },
-    async hapus(index) {
-      if (confirm('Yakin ingin menghapus riwayat ini?')) {
-        this.riwayat.splice(index, 1)
-        try {
-          await axios.post('http://localhost:8000/riwayat', this.riwayat)
-          this.terpilih = null
-        } catch (e) {
-          alert('Gagal menyimpan perubahan riwayat ke backend.')
-        }
-      }
-    },
-    formatDate(dateStr) {
-      const d = new Date(dateStr)
-      return d.toLocaleString()
-    }
+const riwayat = ref([])
+
+onMounted(() => {
+  const data = localStorage.getItem('riwayatPrediksi')
+  if (data) {
+    riwayat.value = JSON.parse(data).map((item, index) => ({
+      ...item,
+      id: item.id ?? index, // fallback id jika belum ada
+      asalData: item.asalData ?? 'default' // fallback default asal data
+    }))
   }
+})
+
+function hapusItem(index) {
+  if (confirm('Yakin ingin menghapus data ini?')) {
+    riwayat.value.splice(index, 1)
+    localStorage.setItem('riwayatPrediksi', JSON.stringify(riwayat.value))
+  }
+}
+
+function hapusSemua() {
+  if (confirm('Yakin ingin menghapus semua data riwayat?')) {
+    localStorage.removeItem('riwayatPrediksi')
+    riwayat.value = []
+  }
+}
+
+function formatAngka(value) {
+  return value?.toLocaleString('id-ID') ?? '-'
+}
+
+function formatPersen(value) {
+  if (value === null || value === undefined) return '-'
+  return value.toFixed(2) + '%'
+}
+
+function mapeClass(mape) {
+  if (mape < 10) return 'mape-baik'
+  else if (mape < 20) return 'mape-cukup'
+  else return 'mape-buruk'
+}
+
+function formatAsalData(value) {
+  if (value === 'upload') return 'Upload'
+  return 'Default'
 }
 </script>
 
 <style scoped>
 .container {
-  max-width: 1000px;
+  max-width: 850px;
   margin: 0 auto;
-  padding: 20px;
-  font-family: Arial, sans-serif;
+  padding: 1.5rem;
+  text-align: center;
+  padding-top: 0px;
 }
+
 .title {
-  font-size: 1.8rem;
+  font-size: 26px;
   font-weight: bold;
-  color: #7ca221;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
+  color: #2d6a4f;
 }
+
 .riwayat-table {
   width: 100%;
   border-collapse: collapse;
+  font-size: 16px;
 }
+
 .riwayat-table th,
 .riwayat-table td {
   border: 1px solid #ccc;
-  padding: 8px 10px;
+  padding: 0.75rem;
   text-align: center;
 }
+
 .riwayat-table th {
-  background-color: #f5f5f5;
+  background-color: #d8f3dc;
+  color: #1b4332;
 }
-.empty {
-  text-align: center;
-  font-style: italic;
-  color: #666;
-  margin-top: 2rem;
+
+.btn-hapus {
+  background-color: #e63946;
+  color: #fff;
+  padding: 0.5rem 1rem;
+  margin-bottom: 1rem;
+  border: none;
+  cursor: pointer;
+  border-radius: 5px;
 }
-button {
-  margin: 2px 4px;
-  padding: 5px 10px;
-  background-color: #2563eb;
+
+.action-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-hapus-item {
+  background-color: #43a86d;
   color: white;
+  padding: 0.4rem 0.8rem;
   border: none;
   border-radius: 4px;
   cursor: pointer;
 }
-button:hover {
-  background-color: #1e40af;
+
+.btn-detail {
+  background-color: #457b9d;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
 }
-.preview {
-  margin-top: 2rem;
-  padding: 1rem;
-  border: 1px dashed #ccc;
-  background-color: #fafafa;
+
+.btn-hapus:hover,
+.btn-hapus-item:hover,
+.btn-detail:hover {
+  opacity: 0.9;
 }
+
+.mape-baik {
+  color: green;
+  font-weight: bold;
+}
+
+.mape-cukup {
+  color: orange;
+  font-weight: bold;
+}
+
+.mape-buruk {
+  color: red;
+  font-weight: bold;
+}
+
 </style>
