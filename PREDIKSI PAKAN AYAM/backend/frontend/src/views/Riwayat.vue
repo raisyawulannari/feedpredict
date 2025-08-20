@@ -8,37 +8,39 @@
       <thead>
         <tr>
           <th>No</th>
-          <th>Tanggal</th>
+          <th>Tanggal Mulai</th>
+          <th>Tanggal Selesai</th>
           <th>Durasi (Hari)</th>
-          <th>Prediksi Pakan</th>
+          <th>Total Karung</th>
           <th>MAPE</th>
-          <th>Asal Data</th> 
-          <th>Nama File</th> 
+          <th>Asal Data</th>
+          <th>Nama File</th>
           <th>Aksi</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="riwayat.length === 0">
-          <td colspan="7" class="text-center">Belum ada data riwayat.</td>
+          <td colspan="9" class="text-center">Belum ada data riwayat.</td>
         </tr>
-        <tr v-for="(item, index) in riwayat" :key="index">
+        <tr v-for="(item, index) in riwayat" :key="item.id">
           <td class="text-center">{{ index + 1 }}</td>
-          <td class="text-center">{{ item.tanggal }}</td>
+          <td class="text-center">{{ formatTanggal(item.tanggal_mulai) }}</td>
+          <td class="text-center">{{ formatTanggal(item.tanggal_selesai) }}</td>
           <td class="text-center">{{ item.durasi ?? '-' }} hari</td>
-          <td class="text-center">{{ formatAngka(item.prediksiPakan) }} kg</td>
-            <td class="text-center" :class="mapeClass(item.mape)">
-              {{ formatPersen(item.mape) }}
-            </td>
-          <td class="text-center">{{ formatAsalData(item.asalData) }}</td>
+          <td class="text-center">{{ formatAngka(Math.round(item.total_karung)) }}</td>
+          <td class="text-center" :class="mapeClass(item.mape)">
+            {{ formatPersen(item.mape) }}
+          </td>
+          <td class="text-center">{{ formatAsalData(item.asal_data) }}</td>
           <td class="text-center">
-            {{ item.asalData === 'upload' ? item.namaFile : 'default' }}
+            {{ item.asal_data === 'upload' ? item.nama_file : 'Default' }}
           </td>
           <td>
             <div class="action-buttons">
-              <RouterLink :to="`/riwayat/${item.id || index}/grafik`" class="btn-detail">
+              <RouterLink :to="{ name: 'Prediksi', query: { riwayat_id: item.id } }" class="btn-detail">
                 Detail
               </RouterLink>
-              <button @click="hapusItem(index)" class="btn-hapus-item">Hapus</button>
+              <button @click="hapusItem(item.id)" class="btn-hapus-item">Hapus</button>
             </div>
           </td>
         </tr>
@@ -50,62 +52,165 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import axios from 'axios'
 
 const riwayat = ref([])
 
+// Load riwayat saat mounted
 onMounted(() => {
-  const data = localStorage.getItem('riwayatPrediksi')
-  if (data) {
-    riwayat.value = JSON.parse(data).map((item, index) => ({
-      ...item,
-      id: item.id ?? index, // fallback id jika belum ada
-      asalData: item.asalData ?? 'default' // fallback default asal data
-    }))
-  }
+  loadRiwayat()
 })
 
-function hapusItem(index) {
-  if (confirm('Yakin ingin menghapus data ini?')) {
-    riwayat.value.splice(index, 1)
-    localStorage.setItem('riwayatPrediksi', JSON.stringify(riwayat.value))
+async function loadRiwayat() {
+  try {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      console.error("Token tidak ditemukan, silakan login ulang")
+      alert("Sesi login habis. Silakan login ulang.")
+      window.location.href = '/login'
+      return
+    }
+
+    const res = await axios.get('http://127.0.0.1:8000/riwayat', {
+      headers: {
+        Authorization: `Bearer ${token.trim()}`
+      }
+    })
+
+    console.log("Raw riwayat dari backend:", res.data)
+
+    riwayat.value = (res.data.riwayat || []).map(item => {
+      let prediksiArray = []
+      let aktualArray = []
+
+      try {
+        prediksiArray = Array.isArray(item.prediksi)
+          ? item.prediksi
+          : typeof item.prediksi === 'string' ? JSON.parse(item.prediksi) : []
+      } catch {
+        prediksiArray = []
+      }
+
+      try {
+        fArray = Array.isArray(item.data_aktual)
+          ? item.data_aktual
+          : typeof item.data_aktual === 'string' ? JSON.parse(item.data_aktual) : []
+      } catch {
+        aktualArray = []
+      }
+
+      const totalKarung = item.total_karung != null
+        ? Number(item.total_karung)
+        : prediksiArray.reduce((sum, p) => sum + (Number(p.y) || 0), 0)
+
+      return {
+        ...item,
+        prediksi: prediksiArray,
+        data_aktual: aktualArray,
+        mape: Number(item.mape) || 0,
+        total_karung: totalKarung
+      }
+    })
+
+    console.log("riwayat.value:", riwayat.value)
+  } catch (error) {
+    console.error('Gagal mengambil data:', error.response?.data || error)
+    if (error.response?.status === 401) {
+      alert("Tidak terautentikasi. Silakan login ulang.")
+      window.location.href = '/login'
+    }
   }
 }
 
-function hapusSemua() {
-  if (confirm('Yakin ingin menghapus semua data riwayat?')) {
-    localStorage.removeItem('riwayatPrediksi')
-    riwayat.value = []
-  }
+// Format tanggal
+function formatTanggal(value) {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (isNaN(d)) return '-'
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
+// Format angka
 function formatAngka(value) {
-  return value?.toLocaleString('id-ID') ?? '-'
+  if (value === undefined || value === null) return '-'
+  return value.toLocaleString('id-ID')
 }
 
+// Format persentase MAPE
 function formatPersen(value) {
   if (value === null || value === undefined) return '-'
   return value.toFixed(2) + '%'
 }
 
+// Kelas MAPE
 function mapeClass(mape) {
   if (mape < 10) return 'mape-baik'
   else if (mape < 20) return 'mape-cukup'
   else return 'mape-buruk'
 }
 
+// Asal data
 function formatAsalData(value) {
   if (value === 'upload') return 'Upload'
   return 'Default'
 }
+
+// Hapus satu riwayat
+async function hapusItem(id) {
+  if (!confirm('Yakin ingin menghapus data ini?')) return;
+
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert("Token tidak ditemukan, silakan login ulang.");
+    window.location.href = '/login';
+    return;
+  }
+
+  try {
+    await axios.delete(`http://127.0.0.1:8000/riwayat/${id}`, {
+      headers: {
+        Authorization: `Bearer ${token.trim()}`
+      }
+    });
+    await loadRiwayat();
+  } catch (error) {
+    console.error(error.response?.data || error);
+    alert("Gagal menghapus riwayat. Silakan coba lagi.");
+  }
+}
+
+// Hapus semua riwayat
+async function hapusSemua() {
+  if (!confirm('Yakin ingin menghapus semua data riwayat?')) return;
+
+  const token = localStorage.getItem('token');
+  if (!token) {
+    alert("Token tidak ditemukan, silakan login ulang.");
+    window.location.href = '/login';
+    return;
+  }
+
+  try {
+    await axios.delete('http://127.0.0.1:8000/riwayat', {
+      headers: {
+        Authorization: `Bearer ${token.trim()}`
+      }
+    });
+    await loadRiwayat();
+  } catch (error) {
+    console.error(error.response?.data || error);
+    alert("Gagal menghapus semua riwayat. Silakan coba lagi.");
+  }
+}
+
 </script>
 
 <style scoped>
 .container {
-  max-width: 850px;
+  max-width: 900px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 1rem;
   text-align: center;
-  padding-top: 0px;
 }
 
 .title {
@@ -189,5 +294,4 @@ function formatAsalData(value) {
   color: red;
   font-weight: bold;
 }
-
 </style>

@@ -1,0 +1,36 @@
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.worksheet.datavalidation import DataValidation
+
+data = {
+    "tanggal": ["2025-07-01", "2025-07-02", "2025-07-03"],
+    "pakan_pakai": [120, 115, 118],
+    "jumlah_ayam": [1000, 995, 992],
+    "jumlah_ayam_mati": [5, 3, 4]
+}
+
+df = pd.DataFrame(data)
+file_name = "template_data_pakan.xlsx"
+df.to_excel(file_name, index=False, engine='openpyxl')
+
+wb = load_workbook(file_name)
+ws = wb.active
+
+for cell in ws["A"][1:]:
+    cell.number_format = 'yyyy-mm-dd'
+
+for col in ["B", "C", "D"]:
+    for cell in ws[col][1:]:
+        cell.number_format = '#,##0'
+
+dv_number = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=False)
+dv_number.add("B2:D1000")
+ws.add_data_validation(dv_number)
+
+dv_date = DataValidation(type="date", allow_blank=False)
+dv_date.add("A2:A1000")
+ws.add_data_validation(dv_date)
+
+wb.save(file_name)
+wb.close()
+print("✅ File valid berhasil disimpan:", file_name)

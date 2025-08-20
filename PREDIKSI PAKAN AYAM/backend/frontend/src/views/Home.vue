@@ -32,57 +32,29 @@
     <section class="arima-info">
       <h2>📊 Apa Itu Metode ARIMA?</h2>
       <p>
-        ARIMA (Autoregressive Integrated Moving Average) adalah metode statistik untuk memprediksi data berdasarkan tren historis.
-        Feed Predict menggunakan ARIMA untuk menghitung kebutuhan pakan harian ayam broiler berdasarkan pola konsumsi sebelumnya.
+        ARIMA (Autoregressive Integrated Moving Average) adalah metode statistik untuk memprediksi data berdasarkan tren
+        historis.
+        Feed Predict menggunakan ARIMA untuk menghitung kebutuhan pakan harian ayam broiler berdasarkan pola konsumsi
+        sebelumnya.
       </p>
-    </section>
 
-    <!-- Map Lokasi -->
-    <section class="location-map">
-      <h2>📍 Lokasi Peternakan</h2>
-      <p>🗺️ Batipuh Panjang, Kec. Koto Tangah, Kota Padang, Sumatera Barat 25586</p>
-      <div id="map"></div>
+      <!-- Tombol Login/Register jika belum login -->
+      <div class="arima-buttons">
+        <router-link v-if="!isLoggedIn" to="/login" class="prediksi-btn">Login</router-link>
+        <router-link v-if="!isLoggedIn" to="/register" class="prediksi-btn">Register</router-link>
+        <!-- Bisa tambahkan tombol lain jika user sudah login -->
+      </div>
     </section>
   </div>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
-import L from 'leaflet'
+import { ref, onMounted } from 'vue'
+
+const isLoggedIn = ref(false)
 
 onMounted(() => {
-  const lat = -0.8166961887713797
-  const lng = 100.33174055209342
-
-  const map = L.map('map', {
-    attributionControl: false,
-    zoomControl: true,
-  }).setView([lat, lng], 13)
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map)
-
-  const marker = L.marker([lat, lng]).addTo(map)
-  marker.bindPopup(`
-    <b>📍 Peternakan Ayam Broiler</b><br>
-    <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" style="color:#007bff;text-decoration:underline">
-      Buka di Google Maps
-    </a>
-  `).openPopup()
-
-  map.on('click', (e) => {
-    const { lat, lng } = e.latlng
-    marker.setLatLng([lat, lng])
-    marker.bindPopup(`
-      📍 Lokasi Baru<br>
-      <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" style="color:#007bff;text-decoration:underline">
-        Buka di Google Maps
-      </a>
-    `).openPopup()
-  })
-
-  setTimeout(() => {
-    map.invalidateSize()
-  }, 300)
+  isLoggedIn.value = !!localStorage.getItem('token')
 })
 </script>
 
@@ -167,13 +139,12 @@ onMounted(() => {
 }
 
 .about-image img {
-  width: 80%;         /* <= skala gambar agar tidak penuh */
-  max-width: 400px;   /* <= batasi ukuran maksimal */
+  width: 80%;
+  max-width: 400px;
   height: auto;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
-
 
 /* Responsive split */
 @media (min-width: 768px) {
@@ -202,22 +173,28 @@ onMounted(() => {
   margin: auto;
 }
 
-/* Map */
-.location-map {
-  padding: 30px 20px;
-  margin-top: 30px;
+.arima-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 20px;
+  flex-wrap: wrap;
 }
 
-#map {
-  height: 300px;
-  width: 100%;
-  margin-top: 15px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+.prediksi-btn {
+  display: inline-block;
+  background-color: white;
+  color: #3e8a0b;
+  font-weight: bold;
+  padding: 10px 20px;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background-color 0.3s ease, color 0.3s ease, transform 0.2s ease;
 }
 
-/* Hilangkan OpenStreetMap attribution */
-.leaflet-control-attribution {
-  display: none !important;
+.prediksi-btn:hover {
+  background-color: #2f6a08;
+  color: white;
+  transform: scale(1.05);
 }
 </style>

@@ -1,0 +1,35 @@
+[
+  {
+    "tanggal": "2025-08-01",
+    "stok": 22,
+    "jumlahAyam": 12,
+    "user_id": "default_user"
+  },
+  {
+    "tanggal": "2025-08-08",
+    "stok": 150,
+    "jumlahAyam": 21000
+  },
+  {
+    "tanggal": "2025-08-12",
+    "stok": 300,
+    "jumlahAyam": 19900
+  },
+  {
+    "tanggal": "2025-08-13",
+    "stok": 50,
+    "jumlahAyam": 20000
+  },
+  {
+    "tanggal": "2025-08-28",
+    "stok": 1,
+    "jumlahAyam": "",
+    "user_id": "default_user"
+  },
+  {
+    "tanggal": "2025-09-06",
+    "stok": 12,
+    "jumlahAyam": 1222,
+    "user_id": "default_user"
+  }
+]

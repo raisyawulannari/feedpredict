@@ -57,7 +57,6 @@
         :predictedData="chartData.prediksi" :periodeEdges="periodeEdges" />
     </div>
 
-
     <!-- Ringkasan -->
     <div class="summary" v-if="summary">
       <h3>Ringkasan Prediksi</h3>
@@ -66,13 +65,9 @@
           <tr>
             <th>Rata-rata Error (MAPE)</th>
             <td>
-              <span :style="{ color: mapeWarna, fontWeight: 'bold' }">
-                {{ mape }}%
-              </span>
+              <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mape }}%</span>
               ➜ Akurasi:
-              <span :style="{ color: mapeWarna, fontWeight: 'bold' }">
-                {{ mapeInterpretasi }}
-              </span>
+              <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mapeInterpretasi }}</span>
             </td>
           </tr>
           <tr>
@@ -113,80 +108,32 @@
           </tr>
         </tbody>
       </table>
+      <div class="download-buttons">
+        <button class="btn" @click="downloadCSV">Download CSV</button>
+        <button class="btn" @click="downloadPDF">Download PDF</button>
+      </div>
     </div>
   </div>
 </template>
 
 <script>
-import axios from "axios"
-import Swal from "sweetalert2"
-import LineChart from "@/components/LineChart.vue"
-import BarChart from "@/components/BarChart.vue"
-import AreaChart from "@/components/AreaChart.vue"
+import axios from "axios";
+import Swal from "sweetalert2";
+import LineChart from "@/components/LineChart.vue";
+import BarChart from "@/components/BarChart.vue";
+import AreaChart from "@/components/AreaChart.vue";
+
+const api = axios.create({
+  baseURL: "http://localhost:8000",
+});
+
+api.interceptors.request.use(config => {
+  const token = localStorage.getItem("token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
 
 export default {
-  computed: {
-    selectedChartComponent() {
-      if (this.chartType === "line") return "LineChart"
-      if (this.chartType === "bar") return "BarChart"
-      if (this.chartType === "area") return "AreaChart"
-      return "LineChart"
-    },
-
-    isRiwayatMode() {
-      return this.$route.name === 'RiwayatGrafik'
-    },
-
-    mape() {
-      if (!this.chartData || !Array.isArray(this.chartData.aktual) || !Array.isArray(this.chartData.prediksi)) {
-        return "0.00";
-      }
-
-      const actualData = this.chartData.aktual.filter(d => d && d.x != null && d.kg != null);
-      const predictedData = this.chartData.prediksi.filter(d => d && d.x != null && d.kg != null);
-
-      let totalError = 0;
-      let n = 0;
-
-      for (let i = 0; i < predictedData.length; i++) {
-        const pred = predictedData[i];
-        if (!pred || pred.x == null || pred.kg == null) continue;
-
-        const actual = actualData.find(d => d && d.x === pred.x && d.kg != null);
-        if (actual && actual.kg > 0) {
-          const error = Math.abs((pred.kg - actual.kg) / actual.kg);
-          totalError += error;
-          n++;
-        }
-      }
-
-      const hasil = n > 0 ? (totalError / n) * 100 : 0;
-
-      console.log("MAPE calculation → n:", n, "totalError:", totalError, "MAPE:", hasil);
-      console.log("Actual Data:", actualData);
-      console.log("Predicted Data:", predictedData);
-
-      return hasil.toFixed(2); // return selalu aman string "0.00" dst
-    },
-
-
-    mapeInterpretasi() {
-      const nilai = this.mape;
-      if (nilai < 10) return 'Sangat Baik';
-      else if (nilai < 20) return 'Baik';
-      else if (nilai < 50) return 'Cukup';
-      else return 'Buruk';
-    },
-
-    mapeWarna() {
-      const nilai = this.mape;
-      if (nilai < 10) return 'green';
-      else if (nilai < 20) return 'limegreen';
-      else if (nilai < 50) return 'orange';
-      else return 'red';
-    }
-  },
-
   components: { LineChart, BarChart, AreaChart },
   data() {
     return {
@@ -197,188 +144,295 @@ export default {
       chartData: null,
       labels: [],
       summary: null,
-      konsumsiPerEkor: null,
       periodeEdges: [],
       chartType: "line",
       files: [],
-      predictedData: [],
-      actualData: [],
-    }
+      predictedDetail: [],
+    };
+  },
+  computed: {
+    selectedChartComponent() {
+      return this.chartType === "bar"
+        ? "BarChart"
+        : this.chartType === "area"
+          ? "AreaChart"
+          : "LineChart";
+    },
+    mape() {
+      return this.summary?.mape?.toFixed(2) ?? "0.00";
+    },
+    mapeInterpretasi() {
+      const nilai = parseFloat(this.mape);
+      if (nilai < 10) return "Sangat Baik";
+      else if (nilai < 20) return "Baik";
+      else if (nilai < 50) return "Cukup";
+      return "Buruk";
+    },
+    mapeWarna() {
+      const nilai = parseFloat(this.mape);
+      if (nilai < 10) return "green";
+      else if (nilai < 20) return "limegreen";
+      else if (nilai < 50) return "orange";
+      return "red";
+    },
   },
   async mounted() {
-    this.files = []
+    const token = localStorage.getItem("token");
+    if (!token) {
+      Swal.fire("Belum Login", "Silakan login terlebih dahulu", "warning").then(() => {
+        this.$router.push("/login");
+      });
+      return;
+    }
+
     try {
-      const res = await axios.get("http://localhost:8000/list_csv_files")
-      this.files = res.data.files || []
+      const res = await api.get("/list_csv_files");
+      this.files = res.data.files || [];
     } catch (err) {
-      console.error("Gagal memuat daftar file CSV:", err)
+      console.error("Gagal memuat daftar file CSV:", err);
+      localStorage.removeItem("token");
+      Swal.fire("Gagal", "Token tidak valid atau CSV gagal dimuat", "error").then(() => {
+        this.$router.push("/login");
+      });
+      return;
     }
 
-    const id = this.$route.params.id
-    if (id !== undefined) {
-      const riwayat = JSON.parse(localStorage.getItem("riwayatPrediksi") || "[]")
-      const item = riwayat[parseInt(id)]
-      if (item) {
-        this.mode = item.mode || "per_ayam"
-        this.tanggal_mulai = item.tanggal_mulai
-        this.tanggal_selesai = item.tanggal_selesai
-        this.jumlah_ayam_awal = item.jumlahAyam ?? 0  // Gunakan fallback jika null/undefined
-
-        // Validasi khusus: pastikan jumlah ayam terisi jika mode per_ayam
-        if (this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
-          Swal.fire({
-            icon: "warning",
-            title: "Data Tidak Lengkap",
-            text: "Jumlah ayam tidak tersedia di riwayat, mohon isi secara manual.",
-          })
-          return
-        }
-
-        await this.getPrediksi(false) // ambil prediksi tanpa simpan lagi
-      }
-    }
+    const riwayat_id = this.$route.query.riwayat_id || this.$route.params.id;
+    const isAdmin = localStorage.getItem("role") === "admin";
+    if (riwayat_id) this.loadRiwayat(riwayat_id, isAdmin);
   },
 
   methods: {
-    async getPrediksi(simpan = true) {
-      if (!this.isRiwayatMode && this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
-        Swal.fire({
-          icon: "warning",
-          title: "Jumlah ayam awal wajib diisi",
-          text: "Mohon isi jumlah ayam awal minimal 1",
-        });
-        return;
-      }
-
-      if (!this.tanggal_mulai || !this.tanggal_selesai) {
-        Swal.fire({
-          icon: "warning",
-          title: "Tanggal belum lengkap",
-          text: "Mohon isi tanggal mulai dan tanggal selesai",
-        });
-        return;
-      }
-
-      const endpoint = this.mode === "per_ayam" ? "predict_per_ayam" : "predict_periode"
-
+    async loadRiwayat(id, isAdmin = false) {
       try {
-        const payload = {
-          tanggal_mulai: this.tanggal_mulai,
-          tanggal_selesai: this.tanggal_selesai,
-          ...(this.mode === "per_ayam" ? { jumlah_ayam_awal: this.jumlah_ayam_awal } : {}),
-          ...(this.file_id ? { file_id: this.file_id } : {})
+        const endpoint = isAdmin ? `/api/admin/riwayat/${id}/detail` : `/riwayat/${id}/detail`;
+        const res = await api.get(endpoint);
+        const riwayat = res.data;
+
+        // --- Set form ---
+        this.mode = riwayat.mode || "per_ayam";
+        this.tanggal_mulai = riwayat.tanggal_mulai;
+        this.tanggal_selesai = riwayat.tanggal_selesai;
+        this.jumlah_ayam_awal = riwayat.jumlah_ayam_awal ?? 0;
+
+        // --- Data prediksi dan aktual ---
+        const aktual = riwayat.data_aktual || [];
+const prediksi = riwayat.prediksi || [];
+
+// --- Semua tanggal unik ---
+const semuaTanggal = Array.from(new Set([
+  ...aktual.map(a => a.x.split("T")[0]),
+  ...prediksi.map(p => p.x.split("T")[0])
+])).sort();
+
+// --- Mapping aktual dan prediksi ---
+const actualMap = {};
+aktual.forEach(a => {
+  const date = a.x.split("T")[0];
+  actualMap[date] = a.kg ?? a.y ?? 0;  // pastikan ada fallback
+});
+
+const predictedMap = {};
+prediksi.forEach(p => {
+  const date = p.x.split("T")[0];
+  predictedMap[date] = p.y ?? 0;
+});
+
+// --- Chart Data ---
+this.labels = semuaTanggal;
+this.chartData = {
+  aktual: semuaTanggal.map(d => actualMap[d] ?? null),  // pakai null biar garis putus jika kosong
+  prediksi: semuaTanggal.map(d => predictedMap[d] ?? null)
+};
+
+
+        // --- Detail prediksi untuk tabel CSV/PDF ---
+        this.predictedDetail = semuaTanggal.map(date => {
+          const pred = prediksi.find(p => p.x.split("T")[0] === date);
+          return {
+            date,
+            value: pred?.y ?? 0,
+            karung: Math.ceil((pred?.y ?? 0) / 50)
+          };
+        });
+
+
+        // --- Periode edges (highlight per minggu) ---
+        const periodeEdges = [];
+        for (let i = 0; i < semuaTanggal.length; i += 7) {
+          periodeEdges.push(i);
+          periodeEdges.push(Math.min(i + 6, semuaTanggal.length - 1));
         }
+        this.periodeEdges = periodeEdges;
 
-        console.log("Payload yang dikirim:", payload);
+        // --- Summary ---
+        this.summary = riwayat.summary || {};
 
-
-        const res = await axios.post(`http://localhost:8000/${endpoint}`, payload)
-
-
-        const prediksi = res.data.data_prediksi || []
-        const aktual = res.data.data_aktual || []
-
-        console.log("Respon dari backend:", res.data)
-        console.log("Prediksi:", prediksi)
-        console.log("Aktual:", aktual)
-
-
-        const semuaTanggal = [...aktual.map(a => a.x), ...prediksi.map(p => p.x)]
-        const tanggalUnik = [...new Set(semuaTanggal.map(t => t.split("T")[0]))].sort()
-
-        const actualMap = Object.fromEntries(aktual.map(a => [a.x.split("T")[0], a.y]))
-        const predictedMap = Object.fromEntries(prediksi.map(p => [p.x.split("T")[0], p.y]))
-
-        const actualData = tanggalUnik.map(label => actualMap[label] ?? null)
-        const predictedData = tanggalUnik.map(label => predictedMap[label] ?? null)
-
-        this.labels = tanggalUnik
-
-        const periodeEdges = []
-        for (let i = 0; i < tanggalUnik.length; i += 7) {
-          periodeEdges.push(i)
-          const akhir = Math.min(i + 6, tanggalUnik.length - 1)
-          periodeEdges.push(akhir)
-        }
-        this.periodeEdges = periodeEdges
-
-        this.chartData = {
-          aktual: actualData,
-          prediksi: predictedData,
-        }
-
-        this.summary = res.data.summary || {}
-
-        if (simpan && this.summary?.total_prediksi_kg) {
-          const tanggal = new Date().toLocaleDateString("id-ID")
-
-          const jumlahAyam = this.mode === "per_ayam"
-            ? this.jumlah_ayam_awal
-            : this.summary.prediksi_jumlah_ayam
-
-          const prediksiPakan = this.summary.total_prediksi_kg
-          this.simpanRiwayat(tanggal, prediksiPakan)
-        }
-      }
-      catch (err) {
-        console.error("Gagal memuat prediksi", err);
-        if (err.response && err.response.data) {
-          console.error("Error detail:", err.response.data);
-          Swal.fire({
-            icon: "error",
-            title: "Gagal memuat prediksi",
-            text: err.response.data.message || "Terjadi kesalahan.",
-          });
+      } catch (err) {
+        console.error("Gagal ambil detail riwayat:", err);
+        if (err.response?.status === 401) {
+          localStorage.removeItem("token");
+          this.$router.push("/login");
         } else {
-          Swal.fire({
-            icon: "error",
-            title: "Kesalahan",
-            text: "Terjadi kesalahan saat mengambil data.",
-          });
+          Swal.fire("Gagal", "Tidak bisa memuat detail riwayat", "error");
         }
       }
     },
 
-    simpanRiwayat(tanggal, prediksiPakan) {
-      const durasi = this.tanggal_mulai && this.tanggal_selesai
-        ? Math.ceil((new Date(this.tanggal_selesai) - new Date(this.tanggal_mulai)) / (1000 * 60 * 60 * 24)) + 1
-        : 0
-
-      const asalData = this.file_id === null ? 'default' : 'upload'
-
-      // ⬇️ Ambil nama file CSV jika asal upload
-      let namaFile = null
-      if (asalData === 'upload') {
-        const fileObj = this.files.find(f => f.id === this.file_id)
-        namaFile = fileObj ? fileObj.fileName : 'Tidak Diketahui'
+    async getPrediksi(simpan = true) {
+      if (!this.tanggal_mulai || !this.tanggal_selesai) {
+        return Swal.fire("Tanggal belum lengkap", "Mohon isi tanggal mulai dan selesai", "warning");
       }
 
-      const data = {
-        tanggal,
-        prediksiPakan,
-        mode: this.mode,
+      if (this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
+        return Swal.fire("Jumlah ayam wajib diisi", "Minimal 1 ayam", "warning");
+      }
+
+      try {
+        const endpoint = this.mode === "per_ayam" ? "/predict_per_ayam" : "/predict_periode";
+
+        const payload = {
+          tanggal_mulai: this.tanggal_mulai,
+          tanggal_selesai: this.tanggal_selesai,
+          file_id: this.file_id || "default",
+        };
+        if (this.mode === "per_ayam") payload.jumlah_ayam_awal = this.jumlah_ayam_awal || 1;
+
+        const res = await api.post(endpoint, payload);
+
+        const prediksi = res.data.data_prediksi || [];
+        const aktual = res.data.data_aktual || [];
+
+        // --- Mapping data untuk grafik ---
+        const semuaTanggal = Array.from(
+          new Set([
+            ...aktual.map(a => a.x.split("T")[0]),
+            ...prediksi.map(p => p.x.split("T")[0])
+          ])
+        ).sort();
+
+        const actualMap = Object.fromEntries(
+          aktual.map(a => [a.x.split("T")[0], a.kg ?? a.y ?? 0])
+        );
+
+        const predictedMap = Object.fromEntries(
+          prediksi.map(p => [p.x.split("T")[0], p.y ?? 0])
+        );
+
+        this.labels = semuaTanggal;cl
+        this.chartData = {
+          aktual: semuaTanggal.map(d => actualMap[d] ?? null),
+          prediksi: semuaTanggal.map(d => predictedMap[d] ?? null)
+        };
+
+        // --- Detail prediksi untuk table / CSV / PDF ---
+        this.predictedDetail = prediksi.map(d => ({
+          date: d.x.split("T")[0],
+          value: d.y ?? 0,
+          karung: Math.ceil((d.y ?? 0) / 50)
+        }));
+
+        // --- Periode edges (untuk highlight per minggu jika perlu) ---
+        const periodeEdges = [];
+        for (let i = 0; i < semuaTanggal.length; i += 7) {
+          periodeEdges.push(i);
+          periodeEdges.push(Math.min(i + 6, semuaTanggal.length - 1));
+        }
+        this.periodeEdges = periodeEdges;
+
+        // --- Summary ---
+        this.summary = res.data.summary || {};
+
+        // --- Simpan riwayat ke backend ---
+        if (simpan && this.summary?.total_prediksi_kg) {
+          await this.simpanRiwayatBackend();
+        }
+
+      } catch (err) {
+        console.error("Gagal memuat prediksi:", err);
+        const msg = err.response?.data?.detail || err.response?.data?.message || "Gagal memuat prediksi";
+        Swal.fire("Error", msg, "error");
+      }
+    },
+
+
+    async simpanRiwayatBackend() {
+      try {
+        const payload = {
+          tanggal_mulai: this.tanggal_mulai,
+          tanggal_selesai: this.tanggal_selesai,
+          file_id: this.file_id || "default",
+        };
+        if (this.mode === "per_ayam") {
+          payload.jumlah_ayam_awal = this.jumlah_ayam_awal || 1; // minimal 1
+        }
+
+        await api.post("/riwayat", payload);
+      } catch (err) {
+        console.error("Gagal simpan riwayat:", err);
+      }
+    },
+
+    downloadCSV() {
+      const rows = this.predictedDetail.map(d => [d.date, d.value, d.karung]);
+      let csvContent = "data:text/csv;charset=utf-8,Date,Prediksi (kg),Karung (50kg)\n";
+      rows.forEach(r => { csvContent += r.join(",") + "\n"; });
+      const link = document.createElement("a");
+      link.setAttribute("href", encodeURI(csvContent));
+      link.setAttribute("download", "prediksi.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    },
+
+    downloadPDF() {
+      if (!this.tanggal_mulai || !this.tanggal_selesai) {
+        return Swal.fire("Tanggal belum lengkap", "Mohon isi tanggal mulai dan selesai", "warning");
+      }
+
+      if (!this.predictedDetail || this.predictedDetail.length === 0) {
+        return Swal.fire("Data kosong", "Prediksi belum tersedia, tampilkan prediksi terlebih dahulu", "warning");
+      }
+
+      // Pastikan value terisi dengan angka
+      const pdfData = this.predictedDetail.map(d => ({
+        date: d.date,
+        value: Number(d.value ?? 0)
+      }));
+
+      api.post("/download-prediksi-pdf", {
+        predicted_detail: pdfData,
+        summary: this.summary,
         tanggal_mulai: this.tanggal_mulai,
-        tanggal_selesai: this.tanggal_selesai,
-        durasi: durasi,
-        jumlahAyam: this.jumlah_ayam_awal,
-        asalData: asalData,
-        namaFile: namaFile,
-      mape: parseFloat(this.mape)
-      }
-
-      const riwayat = JSON.parse(localStorage.getItem("riwayatPrediksi") || "[]")
-      riwayat.push(data)
-      localStorage.setItem("riwayatPrediksi", JSON.stringify(riwayat))
+        tanggal_selesai: this.tanggal_selesai
+      }, { responseType: "blob" })
+        .then(res => {
+          const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+          const link = document.createElement("a");
+          link.href = url;
+          link.setAttribute("download", "prediksi.pdf");
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        })
+        .catch(err => {
+          console.error("Gagal download PDF:", err);
+          Swal.fire("Error", "Gagal download PDF", "error");
+        });
     }
-  }
-}
+
+
+
+  },
+};
 </script>
 
 <style scoped>
+/* style tetap sama seperti sebelumnya */
 .container {
   max-width: 900px;
   margin: 0 auto;
-  padding-top: 0px;
+  padding-top: 10px;
 }
 
 .title {
@@ -484,5 +538,24 @@ export default {
   .summary-table {
     font-size: 12px;
   }
+}
+
+.download-buttons {
+  margin-top: 16px;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.summary-card table td {
+  width: 60%;
+  text-align: left;
+  padding-left: 10px;
+}
+
+.summary-card table th {
+  width: 40%;
+  text-align: right;
+  padding-right: 10px;
 }
 </style>

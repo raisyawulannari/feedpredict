@@ -67,33 +67,34 @@ const allowedLabelIndexes = computed(() => {
   ])
 })
 
-const computedChartData = computed(() => ({
-  labels: props.labels,
-  datasets: [
-    {
-      label: 'Pakan Aktual',
-      data: props.actualData,
-      borderColor: 'green',
-      backgroundColor: 'rgba(0, 128, 0, 0.2)',
-      tension: 0.3,
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      fill: true
-    },
-    {
-      label: 'Prediksi',
-      data: props.predictedData,
-      borderColor: 'gold',
-      backgroundColor: 'rgba(255, 215, 0, 0.2)',
-      borderDash: [6, 3],
-      tension: 0.3,
-      pointRadius: 4,
-      pointHoverRadius: 6,
-      fill: true
-    }
-  ]
-}))
-
+const computedChartData = computed(() => {
+  return {
+    labels: props.labels,
+    datasets: [
+      {
+        label: 'Pakan Aktual',
+        data: props.actualData, // ⬅️ langsung karung
+        borderColor: 'green',
+        backgroundColor: 'rgba(0, 128, 0, 0.2)',
+        tension: 0.3,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true
+      },
+      {
+        label: 'Prediksi',
+        data: props.predictedData, // ini tetap kg
+        borderColor: 'gold',
+        backgroundColor: 'rgba(255, 215, 0, 0.2)',
+        borderDash: [6, 3],
+        tension: 0.3,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true
+      }
+    ]
+  }
+})
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
@@ -110,21 +111,38 @@ const chartOptions = {
         },
         label: function (context) {
           const dataset = context.dataset
-          const karung = context.raw?.y ?? context.raw ?? 0
-          const kg = context.raw?.kg ?? karung * 50
+          const rawVal = context.raw?.y ?? context.raw ?? 0
           const periode = context.raw?.periode
+
+          let karung = 0
+          let kg = 0
+
+          if (dataset.label === 'Pakan Aktual') {
+            // Data aktual dari CSV = karung, konversi ke kg
+            karung = rawVal
+            kg = karung * 50
+          } else {
+            // Data prediksi = kg, konversi ke karung
+            kg = rawVal
+            karung = Math.ceil(kg / 50)
+          }
+
+          const kgFormatted = kg.toFixed(2).replace('.', ',')
+          const karungFormatted = karung.toLocaleString('id-ID')
 
           if (dataset.label === 'Pakan Aktual') {
             return [
               periode ? `Periode : Periode ke-${periode}` : null,
-              `Pakan Pakai : ${karung} karung (${kg} kg)`
+              `Pakan Pakai : ${karungFormatted} karung (${kgFormatted} kg)`
             ].filter(Boolean)
           } else {
-            return [`Pakan Prediksi : ${karung} karung (${kg} kg)`]
+            return [`Pakan Prediksi : ${karungFormatted} karung (${kgFormatted} kg)`]
           }
         }
+
       }
     },
+
     legend: {
       position: 'top'
     },
