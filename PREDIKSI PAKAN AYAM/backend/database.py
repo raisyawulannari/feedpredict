@@ -8,19 +8,22 @@ DB_CONFIG = {
     "database": "prediksi_db"
 }
 
-
 def get_db_connection() -> MySQLConnection:
     """
     Membuka koneksi ke database MySQL.
     Gunakan `conn = get_db_connection()` lalu `conn.close()` setelah selesai.
     """
-    return mysql.connector.connect(
-        host=DB_CONFIG["host"],
-        user=DB_CONFIG["user"],
-        password=DB_CONFIG["password"],
-        database=DB_CONFIG["database"]
-    )
-
+    try:
+        conn = mysql.connector.connect(
+            host=DB_CONFIG["host"],
+            user=DB_CONFIG["user"],
+            password=DB_CONFIG["password"],
+            database=DB_CONFIG["database"]
+        )
+        return conn
+    except mysql.connector.Error as e:
+        print("❌ Gagal koneksi ke database:", e)
+        raise e  # jangan return None, biar error terlihat jelas
 
 def init_db() -> None:
     """
@@ -53,7 +56,7 @@ def init_db() -> None:
         );
         """)
 
-        # Tabel riwayat
+        # Tabel riwayat dengan kolom jumlah_ayam_awal
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS riwayat (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -61,44 +64,42 @@ def init_db() -> None:
             tanggal_mulai DATE NOT NULL,
             tanggal_selesai DATE NOT NULL,
             durasi INT NOT NULL,
+            jumlah_ayam_awal INT DEFAULT 0,  -- jumlah ayam awal untuk mode per_ayam
+            mode_prediksi ENUM('per_ayam', 'per_periode') DEFAULT 'per_ayam',
             prediksi JSON NOT NULL,
             data_aktual JSON NULL,
+            total_pakan_kg FLOAT DEFAULT 0,  -- total pakan dalam kg
             total_karung FLOAT DEFAULT 0,
             mape FLOAT NULL,
             asal_data VARCHAR(50) NULL,
             nama_file VARCHAR(50) NULL,
             activity VARCHAR(255) NULL, -- log aktivitas
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- waktu dibuat
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- waktu dibuat
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         );
         """)
-
-        # Tabel prediksi
+        
+        # Tabel data_pakan
         cursor.execute("""
-        CREATE TABLE IF NOT EXISTS prediksi (
+        CREATE TABLE IF NOT EXISTS data_pakan (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            riwayat_id INT NOT NULL,
-            tanggal_mulai DATE NOT NULL,
-            tanggal_selesai DATE NOT NULL,
-            mode_prediksi ENUM('per_ayam', 'periode') DEFAULT 'per_ayam',
-            total_karung FLOAT DEFAULT 0,
-            jumlah_ayam INT DEFAULT 0,
+            user_id INT NOT NULL,
+            tanggal DATE NOT NULL,
+            nama_file VARCHAR(20) DEFAULT '',        
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            FOREIGN KEY (riwayat_id) REFERENCES riwayat(id) ON DELETE CASCADE
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
         """)
 
-        # Commit & close
         conn.commit()
         cursor.close()
         conn.close()
 
-        print("✅ Database dan tabel siap digunakan!")
+        print("✅ Database dan tabel riwayat siap digunakan!")
 
     except mysql.connector.Error as e:
         print("❌ Gagal inisialisasi DB:", e)
 
-
-# Jalankan init_db() sekali saja untuk setup awal
 if __name__ == "__main__":
     init_db()

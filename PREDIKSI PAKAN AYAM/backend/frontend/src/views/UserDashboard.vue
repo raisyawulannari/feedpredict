@@ -1,43 +1,35 @@
 <template>
   <div class="dashboard-container">
-    <h1 class="dashboard-title">User Dashboard</h1>
-
-    <!-- Cards Summary -->
-    <div class="cards">
-      <div class="card total-prediksi">
-        <div class="icon">📊</div>
-        <div class="info">
-          <h2>{{ totalPrediksi }}</h2>
-          <p>Jumlah prediksi yang telah dilakukan</p>
-        </div>
-      </div>
-
-      <div class="card riwayat-prediksi">
-        <div class="icon">📝</div>
-        <div class="info">
-          <h2>{{ totalRiwayat }}</h2>
-          <p>Total riwayat prediksi dan penggunaan pakan</p>
-        </div>
-      </div>
-
-      <div class="card prediksi-hari-ini">
-        <div class="icon">⏰</div>
-        <div class="info">
-          <h2>{{ prediksiHariIni }}</h2>
-          <p>Prediksi yang dilakukan pada hari ini</p>
-        </div>
-      </div>
+    <!-- Header -->
+    <div class="dashboard-header">
+      <h1 class="dashboard-title">Welcome To User Dashboard</h1>
     </div>
 
-    <!-- Histori Prediksi Terakhir -->
-    <div class="recent-predictions mt-8">
-      <h2 class="recent-title">Histori Prediksi Terakhir</h2>
-      <ul>
-        <li v-for="(item, index) in recentPredictions" :key="index" class="recent-item">
-          <span class="prediction-date">{{ item.date }}</span>
-          <span class="prediction-value">{{ item.value }}</span>
-        </li>
-      </ul>
+    <!-- Main Cards -->
+    <div class="main-cards">
+      <!-- Card Total Riwayat -->
+      <div class="card total-prediksi-card">
+        <h2 class="count">{{ animatedTotalRiwayat }}</h2>
+        <p>Total Riwayat Prediksi</p>
+        <button @click="goToPrediksi" class="btn-prediksi">Lakukan Prediksi Sekarang</button>
+      </div>
+
+      <!-- Card Historis -->
+      <div class="card historis-card">
+        <h2 class="historis-title">Historis</h2>
+        <div class="historis-table">
+          <div class="historis-row header">
+            <span>Tanggal</span>
+            <span>Mode</span>
+            <span>Total Pakan</span>
+          </div>
+          <div v-for="(item, index) in recentPredictions" :key="index" class="historis-row">
+            <span>{{ item.tanggal_mulai }} - {{ item.tanggal_selesai }}</span>
+            <span>{{ item.mode_prediksi }}</span>
+            <span>{{ item.total_pakan_kg.toFixed(2) }} kg ({{ item.total_karung }} karung)</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -46,118 +38,185 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 
-const totalPrediksi = ref(0)
 const totalRiwayat = ref(0)
-const prediksiHariIni = ref(0)
-const recentPredictions = ref([]) // array histori prediksi terakhir
+const recentPredictions = ref([])
+const animatedTotalRiwayat = ref(0)
+
+const animateValue = (refValue, target, duration = 1000) => {
+  target = Number(target) || 0
+  let start = 0
+  const stepTime = 20
+  const steps = duration / stepTime
+  const increment = (target - start) / steps
+  const timer = setInterval(() => {
+    start += increment
+    if (start >= target) {
+      refValue.value = target
+      clearInterval(timer)
+    } else {
+      refValue.value = Math.floor(start)
+    }
+  }, stepTime)
+}
+
+const goToPrediksi = () => {
+  window.location.href = "http://127.0.0.1:8000/prediksi"
+}
 
 onMounted(async () => {
   try {
     const token = localStorage.getItem('token')
-    const res = await axios.get('http://127.0.0.1:8000/api/user/dashboard', {
+    const res = await axios.get('http://127.0.0.1:8000/riwayat', {
       headers: { Authorization: `Bearer ${token}` }
     })
 
-    totalPrediksi.value = res.data.totalPrediksi
-    totalRiwayat.value = res.data.totalRiwayat
-    prediksiHariIni.value = res.data.prediksiHariIni
-    recentPredictions.value = res.data.recentPredictions // ambil data historis dari API
+    const riwayat = (res.data.riwayat || []).map(item => ({
+      ...item,
+      total_pakan_kg: Number(item.total_pakan_kg) || 0,
+      total_karung: Number(item.total_karung) || 0
+    }))
+
+    totalRiwayat.value = riwayat.length
+    recentPredictions.value = riwayat.slice(0, 5)
+    animateValue(animatedTotalRiwayat, totalRiwayat.value)
   } catch (err) {
-    console.error('Gagal memuat data dashboard:', err)
+    console.error('Gagal memuat riwayat:', err)
   }
 })
 </script>
 
 <style scoped>
 .dashboard-container {
-  padding: 2rem;
+  padding: 1.5rem;
   font-family: 'Poppins', sans-serif;
+  background-color: #f2f7f0;
+}
+
+/* Header */
+.dashboard-header {
+  /* background-image: url('https://images.pexels.com/photos/4911679/pexels-photo-4911679.jpeg'); */
+  background-image: url('https://images.pexels.com/photos/460621/pexels-photo-460621.jpeg');
+  /* background-image: url('https://images.pexels.com/photos/167684/pexels-photo-167684.jpeg'); */
+  /* background-image: url('@/assets/user_dashboard1.jpeg');  */
+  background-size: cover;
+  background-position: center;
+  border-radius: 12px;
+  padding: 2rem;
+  margin-bottom: 5rem;
 }
 
 .dashboard-title {
+  color: #fff;
+  text-align: center;
   font-size: 2rem;
-  margin-bottom: 2rem;
-  color: #5d2d1d;
+  font-weight: 700;
+  text-shadow: 1px 1px 5px rgba(0,0,0,0.5);
 }
 
-.cards {
+/* Main Cards */
+.main-cards {
   display: flex;
   gap: 2rem;
   flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: flex-start;
 }
 
-.card {
-  display: flex;
-  align-items: center;
-  padding: 1.5rem;
-  border-radius: 12px;
+/* Card Total Riwayat */
+.total-prediksi-card {
+  background: linear-gradient(135deg, #327e2b, #81c784);
   color: #fff;
-  flex: 1;
-  min-width: 220px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s ease;
+  border-radius: 15px;
+  flex: 1 1 280px;
+  padding: 2rem;
+  text-align: center;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-height: fit-content; 
 }
 
-.card:hover {
-  transform: translateY(-5px);
+.total-prediksi-card .count {
+  font-size: 3rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
 }
 
-.icon {
-  font-size: 2.5rem;
-  margin-right: 1rem;
+.total-prediksi-card p {
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
 }
 
-.info h2 {
-  margin: 0;
-  font-size: 1.8rem;
+.btn-prediksi {
+  padding: 0.7rem 1.5rem;
+  background-color: #2e7d32;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: 0.3s;
 }
 
-.info p {
-  margin: 0.2rem 0 0;
-  font-size: 0.9rem;
+.btn-prediksi:hover {
+  background-color: #388e3c;
 }
 
-/* WARNA CARD */
-.total-prediksi {
-  background-color: #5d2d1d;
+/* Card Historis */
+.historis-card {
+  background-color: #fff;
+  border-radius: 15px;
+  flex: 1 1 700px;
+  padding: 2rem;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+  overflow-x: auto;
 }
 
-.riwayat-prediksi {
-  background-color: #a35d2d;
-}
-
-.prediksi-hari-ini {
-  background-color: #e67e22;
-}
-
-/* Histori Prediksi */
-.recent-predictions {
-  margin-top: 2rem;
-}
-
-.recent-title {
-  font-size: 1.5rem;
+.historis-title {
+  font-size: 1.6rem;
   font-weight: 600;
   margin-bottom: 1rem;
   color: #5d2d1d;
 }
 
-.recent-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  background-color: #f4f4f4;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
+/* Tabel horizontal */
+.historis-table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
 }
 
-.prediction-date {
-  font-weight: 500;
+.historis-row {
+  display: table-row;
+}
+
+.historis-row.header {
+  font-weight: 600;
+  border-bottom: 2px solid #5d2d1d;
+}
+
+.historis-row span {
+  display: table-cell;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #eee;
+  font-size: 1rem;
   color: #333;
 }
 
-.prediction-value {
-  font-weight: 600;
-  color: #5d2d1d;
+/* ===== Responsiveness ===== */
+@media (max-width: 900px) {
+  .main-cards {
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .total-prediksi-card,
+  .historis-card {
+    flex: 1 1 100%;
+  }
+  .historis-row span {
+    display: block; /* untuk mobile, tumpuk vertical */
+    border-bottom: 1px solid #eee;
+  }
 }
 </style>

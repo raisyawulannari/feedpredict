@@ -11,30 +11,28 @@ const Login = () => import('../views/Login.vue')
 const AdminDashboard = () => import('../views/AdminDashboard.vue')
 const UserDashboard = () => import('../views/UserDashboard.vue')
 const KelolaUser = () => import('../views/KelolaUser.vue')
-const AdminPrediksi = () => import('../views/AdminPrediksi.vue')   
-const AdminRiwayat = () => import('../views/AdminRiwayat.vue')    
+const AdminRiwayat = () => import('../views/AdminRiwayat.vue')
 
 // ===== Routes =====
 const routes = [
-  { path: '/', redirect: '/home' }, // default buka home (About)
+  { path: '/', redirect: '/home' }, // default ke home
   { path: '/home', name: 'Home', component: Home },
-  { path: '/prediksi', name: 'Prediksi', component: Prediksi, meta: { requiresAuth: true, role: 'user' } },
-  { path: '/riwayat', name: 'Riwayat', component: Riwayat, meta: { requiresAuth: true, role: 'user' } },
-  { path: '/data-pakan', name: 'DataPakan', component: DataPakan, meta: { requiresAuth: true, role: 'user' } },
   { path: '/register', name: 'Register', component: Register },
   { path: '/login', name: 'Login', component: Login },
 
-  // ===== User Dashboard =====
+  // ===== User Routes =====
+  { path: '/prediksi', name: 'Prediksi', component: Prediksi, meta: { requiresAuth: true, role: 'user' } },
+  { path: '/riwayat', name: 'Riwayat', component: Riwayat, meta: { requiresAuth: true, role: 'user' } },
+  { path: '/data-pakan', name: 'DataPakan', component: DataPakan, meta: { requiresAuth: true, role: 'user' } },
   { path: '/user/dashboard', name: 'UserDashboard', component: UserDashboard, meta: { requiresAuth: true, role: 'user' } },
 
-  // ===== Admin Dashboard =====
+  // ===== Admin Routes =====
   { path: '/admin/dashboard', name: 'AdminDashboard', component: AdminDashboard, meta: { requiresAuth: true, role: 'admin' } },
   { path: '/admin/users', name: 'KelolaUser', component: KelolaUser, meta: { requiresAuth: true, role: 'admin' } },
-  { path: '/admin/prediksi', name: 'AdminPrediksi', component: AdminPrediksi, meta: { requiresAuth: true, role: 'admin' } },
   { path: '/admin/prediksi/:id', name: 'AdminPrediksiDetail', component: Prediksi, meta: { requiresAuth: true, role: 'admin' } },
   { path: '/admin/riwayat', name: 'AdminRiwayat', component: AdminRiwayat, meta: { requiresAuth: true, role: 'admin' } },
 
-  // fallback: redirect ke home
+  // fallback
   { path: '/:pathMatch(.*)*', redirect: '/home' }
 ]
 
@@ -49,33 +47,40 @@ router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
   const role = localStorage.getItem('role')
 
-  // Kalau ada token, cek apakah expired
+  // 🔓 Public routes (selalu bisa diakses tanpa login)
+  const publicPaths = ['/home', '/login', '/register']
+  if (publicPaths.includes(to.path)) {
+    return next()
+  }
+
+  // 🔑 Kalau ada token → cek expired
   if (token) {
     try {
       const decoded = jwtDecode(token)
       const now = Date.now() / 1000
       if (decoded.exp && decoded.exp < now) {
-        // Token expired → hapus semua data & paksa login
         localStorage.clear()
         return next('/login')
       }
     } catch {
-      // Token rusak → hapus semua data & paksa login
       localStorage.clear()
       return next('/login')
     }
   }
 
-  // Jika rute membutuhkan login tapi token tidak ada
-  if (to.meta.requiresAuth && !token) return next('/login')
+  // 🚫 Kalau butuh auth tapi belum login
+  if (to.meta.requiresAuth && !token) {
+    return next('/login')
+  }
 
-  // Jika role tidak sesuai
+  // 🚦 Kalau role tidak sesuai
   if (to.meta.role && role !== to.meta.role) {
     if (role === 'admin') return next('/admin/dashboard')
     if (role === 'user') return next('/user/dashboard')
     return next('/login')
   }
 
+  // ✅ default lanjut
   next()
 })
 

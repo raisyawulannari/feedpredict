@@ -11,7 +11,7 @@
       <nav class="nav-links">
         <!-- Menu sebelum login -->
         <template v-if="!isLoggedIn">
-          <router-link to="/" class="nav-link">About</router-link>
+          <router-link to="/" class="nav-link">Home</router-link>
           <router-link to="/login" class="nav-link auth-link">Login</router-link>
         </template>
 
@@ -25,7 +25,6 @@
 
           <!-- ADMIN MENU -->
           <router-link v-if="isAdmin" :to="dashboardLink" class="nav-link">Dashboard</router-link>
-          <router-link v-if="isAdmin" to="/admin/prediksi" class="nav-link">Prediksi User</router-link>
           <router-link v-if="isAdmin" to="/admin/riwayat" class="nav-link">Riwayat User</router-link>
           <router-link v-if="isAdmin" to="/admin/users" class="nav-link">Kelola User</router-link>
         </template>
@@ -100,11 +99,11 @@ function handleUpdateNotifikasi(payload) {
 // Sync user & notifikasi saat reload
 onMounted(() => {
   const savedUser = localStorage.getItem('user')
-  if(savedUser) {
+  if (savedUser) {
     setUser(JSON.parse(savedUser))
-  } else {
-    logout()
   }
+  // kalau gak ada user, biarin aja, biar bisa lihat Home dulu
+
 
   const savedNotif = localStorage.getItem('notifikasi')
   if(savedNotif) {
@@ -161,6 +160,7 @@ watch(user, (newUser) => {
   z-index: 100;
   flex-wrap: wrap;
   box-sizing: border-box;
+  padding-bottom: 0%;
 }
 .logo img { height: 55px; }
 

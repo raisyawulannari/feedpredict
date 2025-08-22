@@ -8,7 +8,7 @@
         <label>Mode Prediksi:</label>
         <select v-model="mode" class="input">
           <option value="per_ayam">Prediksi Per Ayam</option>
-          <option value="per_periode">Prediksi Harian</option>
+          <option value="per_periode">Prediksi Periode</option>
         </select>
       </div>
 
@@ -58,61 +58,70 @@
     </div>
 
     <!-- Ringkasan -->
-    <div class="summary" v-if="summary">
-      <h3>Ringkasan Prediksi</h3>
-      <table class="summary-table">
-        <tbody>
-          <tr>
-            <th>Rata-rata Error (MAPE)</th>
-            <td>
-              <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mape }}%</span>
-              ➜ Akurasi:
-              <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mapeInterpretasi }}</span>
-            </td>
-          </tr>
-          <tr>
-            <th>Total Pakan</th>
-            <td>{{ Math.round(summary.total_prediksi_kg).toLocaleString('id-ID') }} kg</td>
-          </tr>
-          <tr>
-            <th>Total Karung (50kg)</th>
-            <td>{{ Math.ceil(summary.total_prediksi_karung).toLocaleString('id-ID') }} karung</td>
-          </tr>
-          <tr v-if="mode === 'per_ayam' && summary.rata_per_ayam_kg_per_hari">
-            <th>Konsumsi Harian per Ekor</th>
-            <td>{{ summary.rata_per_ayam_kg_per_hari }} kg/ekor/hari</td>
-          </tr>
-          <tr v-if="mode === 'per_ayam' && summary.jumlah_ayam_awal">
-            <th>Jumlah Ayam Awal</th>
-            <td>{{ summary.jumlah_ayam_awal.toLocaleString('id-ID') }} ekor</td>
-          </tr>
-          <tr v-if="mode === 'per_ayam' && summary.perkiraan_akhir_ayam">
-            <th>Perkiraan Ayam Hidup di Akhir</th>
-            <td>{{ summary.perkiraan_akhir_ayam?.toLocaleString('id-ID') }} ekor</td>
-          </tr>
-          <tr v-if="mode === 'per_periode' && summary.prediksi_jumlah_ayam">
-            <th>Jumlah Ayam yang Diprediksi</th>
-            <td>{{ summary.prediksi_jumlah_ayam }} ekor</td>
-          </tr>
-          <tr v-if="summary.rata_mati_per_hari !== undefined">
-            <th>Rata-rata Ayam Mati per Hari</th>
-            <td>{{ Math.round(summary.rata_mati_per_hari || 0).toLocaleString('id-ID') }} ekor</td>
-          </tr>
-          <tr v-if="summary.durasi_hari">
-            <th>Durasi (Hari)</th>
-            <td>{{ summary.durasi_hari }} hari</td>
-          </tr>
-          <tr v-if="summary.catatan">
-            <th>Catatan</th>
-            <td>{{ summary.catatan }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <div class="download-buttons">
-        <button class="btn" @click="downloadCSV">Download CSV</button>
-        <button class="btn" @click="downloadPDF">Download PDF</button>
-      </div>
+<div class="summary">
+  <h3>Ringkasan Prediksi</h3>
+
+  <template v-if="summary && summary.total_prediksi_kg">
+    <table class="summary-table">
+      <tbody>
+        <tr>
+          <th>Rata-rata Error (MAPE)</th>
+          <td>
+            <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mape }}%</span>
+            ➜ Akurasi:
+            <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mapeInterpretasi }}</span>
+          </td>
+        </tr>
+        <tr>
+          <th>Total Pakan</th>
+          <td>{{ Math.round(summary.total_prediksi_kg).toLocaleString('id-ID') }} kg</td>
+        </tr>
+        <tr>
+          <th>Total Karung (50kg)</th>
+          <td>{{ Math.ceil(summary.total_prediksi_karung).toLocaleString('id-ID') }} karung</td>
+        </tr>
+        <tr v-if="mode === 'per_ayam' && summary.rata_per_ayam_kg_per_hari">
+          <th>Konsumsi Harian per Ekor</th>
+          <td>{{ summary.rata_per_ayam_kg_per_hari }} kg/ekor/hari</td>
+        </tr>
+        <tr v-if="mode === 'per_ayam' && summary.jumlah_ayam_awal">
+          <th>Jumlah Ayam Awal</th>
+          <td>{{ summary.jumlah_ayam_awal.toLocaleString('id-ID') }} ekor</td>
+        </tr>
+        <tr v-if="mode === 'per_ayam' && summary.perkiraan_akhir_ayam">
+          <th>Perkiraan Ayam Hidup di Akhir</th>
+          <td>{{ summary.perkiraan_akhir_ayam?.toLocaleString('id-ID') }} ekor</td>
+        </tr>
+        <tr v-if="mode === 'per_periode' && summary.prediksi_jumlah_ayam">
+          <th>Jumlah Ayam yang Diprediksi</th>
+          <td>{{ summary.prediksi_jumlah_ayam }} ekor</td>
+        </tr>
+        <tr v-if="summary.rata_mati_per_hari !== undefined">
+          <th>Rata-rata Ayam Mati per Hari</th>
+          <td>{{ Math.round(summary.rata_mati_per_hari || 0).toLocaleString('id-ID') }} ekor</td>
+        </tr>
+        <tr v-if="summary.durasi_hari">
+          <th>Durasi (Hari)</th>
+          <td>{{ summary.durasi_hari }} hari</td>
+        </tr>
+        <tr v-if="summary.catatan">
+          <th>Catatan</th>
+          <td>{{ summary.catatan }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="download-buttons">
+      <button class="btn" @click="downloadCSV">Download CSV</button>
+      <button class="btn" @click="downloadPDF">Download PDF</button>
     </div>
+  </template>
+
+  <div v-else class="text-gray-500 italic text-center p-4">
+    Belum ada hasil prediksi, silakan pilih mode lalu klik <b>Tampilkan Prediksi</b>.
+  </div>
+</div>
+
   </div>
 </template>
 
@@ -280,98 +289,119 @@ this.chartData = {
     },
 
     async getPrediksi(simpan = true) {
-      if (!this.tanggal_mulai || !this.tanggal_selesai) {
-        return Swal.fire("Tanggal belum lengkap", "Mohon isi tanggal mulai dan selesai", "warning");
-      }
+  // --- Validasi form ---
+  if (!this.tanggal_mulai || !this.tanggal_selesai) {
+    return Swal.fire("Tanggal belum lengkap", "Mohon isi tanggal mulai dan selesai", "warning");
+  }
 
-      if (this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
-        return Swal.fire("Jumlah ayam wajib diisi", "Minimal 1 ayam", "warning");
-      }
+  if (this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
+    return Swal.fire("Jumlah ayam wajib diisi", "Minimal 1 ayam", "warning");
+  }
 
-      try {
-        const endpoint = this.mode === "per_ayam" ? "/predict_per_ayam" : "/predict_periode";
+  if (new Date(this.tanggal_selesai) < new Date(this.tanggal_mulai)) {
+    return Swal.fire("Tanggal salah", "Tanggal selesai tidak boleh sebelum tanggal mulai", "warning");
+  }
 
-        const payload = {
-          tanggal_mulai: this.tanggal_mulai,
-          tanggal_selesai: this.tanggal_selesai,
-          file_id: this.file_id || "default",
-        };
-        if (this.mode === "per_ayam") payload.jumlah_ayam_awal = this.jumlah_ayam_awal || 1;
+  try {
+    const endpoint = this.mode === "per_ayam" ? "/predict_per_ayam" : "/predict_periode";
 
-        const res = await api.post(endpoint, payload);
+    // --- Payload untuk backend ---
+    const payload = {
+      tanggal_mulai: this.tanggal_mulai,
+      tanggal_selesai: this.tanggal_selesai,
+      file_id: this.file_id != null ? String(this.file_id) : "default", // pastikan string
+    };
 
-        const prediksi = res.data.data_prediksi || [];
-        const aktual = res.data.data_aktual || [];
+    if (this.mode === "per_ayam") {
+      payload.jumlah_ayam_awal = this.jumlah_ayam_awal ?? 1;
+    }
 
-        // --- Mapping data untuk grafik ---
-        const semuaTanggal = Array.from(
-          new Set([
-            ...aktual.map(a => a.x.split("T")[0]),
-            ...prediksi.map(p => p.x.split("T")[0])
-          ])
-        ).sort();
+    console.log("Payload prediksi:", payload);
 
-        const actualMap = Object.fromEntries(
-          aktual.map(a => [a.x.split("T")[0], a.kg ?? a.y ?? 0])
-        );
+    const res = await api.post(endpoint, payload);
 
-        const predictedMap = Object.fromEntries(
-          prediksi.map(p => [p.x.split("T")[0], p.y ?? 0])
-        );
+    const prediksi = res.data.data_prediksi || [];
+    const aktual = res.data.data_aktual || [];
+    const apiSummary = res.data.summary || {};
 
-        this.labels = semuaTanggal;cl
-        this.chartData = {
-          aktual: semuaTanggal.map(d => actualMap[d] ?? null),
-          prediksi: semuaTanggal.map(d => predictedMap[d] ?? null)
-        };
+    // --- Semua tanggal unik ---
+    const semuaTanggal = Array.from(
+      new Set([...aktual.map(a => a.x.split("T")[0]), ...prediksi.map(p => p.x.split("T")[0])])
+    ).sort();
 
-        // --- Detail prediksi untuk table / CSV / PDF ---
-        this.predictedDetail = prediksi.map(d => ({
-          date: d.x.split("T")[0],
-          value: d.y ?? 0,
-          karung: Math.ceil((d.y ?? 0) / 50)
-        }));
+    // --- Mapping data untuk chart ---
+    const actualMap = Object.fromEntries(
+      aktual.map(a => [a.x.split("T")[0], a.kg ?? a.y ?? 0])
+    );
+    const predictedMap = Object.fromEntries(
+      prediksi.map(p => [p.x.split("T")[0], p.y ?? 0])
+    );
 
-        // --- Periode edges (untuk highlight per minggu jika perlu) ---
-        const periodeEdges = [];
-        for (let i = 0; i < semuaTanggal.length; i += 7) {
-          periodeEdges.push(i);
-          periodeEdges.push(Math.min(i + 6, semuaTanggal.length - 1));
-        }
-        this.periodeEdges = periodeEdges;
+    this.labels = semuaTanggal;
+    this.chartData = {
+      aktual: semuaTanggal.map(d => actualMap[d] ?? null),
+      prediksi: semuaTanggal.map(d => predictedMap[d] ?? null)
+    };
 
-        // --- Summary ---
-        this.summary = res.data.summary || {};
+    // --- Detail prediksi untuk CSV/PDF ---
+    this.predictedDetail = semuaTanggal.map(date => {
+      const pred = prediksi.find(p => p.x.split("T")[0] === date);
+      return {
+        date,
+        value: pred?.y ?? 0,
+        karung: Math.ceil((pred?.y ?? 0) / 50)
+      };
+    });
 
-        // --- Simpan riwayat ke backend ---
-        if (simpan && this.summary?.total_prediksi_kg) {
-          await this.simpanRiwayatBackend();
-        }
+    // --- Periode edges (highlight per minggu) ---
+    const periodeEdges = [];
+    for (let i = 0; i < semuaTanggal.length; i += 7) {
+      periodeEdges.push(i);
+      periodeEdges.push(Math.min(i + 6, semuaTanggal.length - 1));
+    }
+    this.periodeEdges = periodeEdges;
 
-      } catch (err) {
-        console.error("Gagal memuat prediksi:", err);
-        const msg = err.response?.data?.detail || err.response?.data?.message || "Gagal memuat prediksi";
-        Swal.fire("Error", msg, "error");
-      }
-    },
+    // --- Summary disesuaikan per mode ---
+    this.summary = {
+      ...apiSummary,
+      jumlah_ayam_awal: this.mode === 'per_ayam' ? apiSummary.jumlah_ayam_awal : undefined,
+      perkiraan_akhir_ayam: this.mode === 'per_ayam' ? apiSummary.perkiraan_akhir_ayam : undefined,
+      rata_per_ayam_kg_per_hari: this.mode === 'per_ayam' ? apiSummary.konsumsi_harian_per_ekor : undefined,
+      prediksi_jumlah_ayam: this.mode === 'per_periode' ? apiSummary.prediksi_jumlah_ayam : undefined,
+      catatan: apiSummary.catatan || ""
+    };
 
+    // --- Simpan riwayat backend jika valid ---
+    if (simpan && this.summary?.total_prediksi_kg) {
+      await this.simpanRiwayatBackend();
+    }
+
+  } catch (err) {
+    console.error("Gagal memuat prediksi:", err);
+    const msg = err.response?.data?.detail || err.response?.data?.message || "Gagal memuat prediksi";
+    Swal.fire("Error", typeof msg === "string" ? msg : JSON.stringify(msg), "error");
+  }
+},
 
     async simpanRiwayatBackend() {
-      try {
-        const payload = {
-          tanggal_mulai: this.tanggal_mulai,
-          tanggal_selesai: this.tanggal_selesai,
-          file_id: this.file_id || "default",
-        };
-        if (this.mode === "per_ayam") {
-          payload.jumlah_ayam_awal = this.jumlah_ayam_awal || 1; // minimal 1
-        }
+  try {
+    const payload = {
+      tanggal_mulai: this.tanggal_mulai,
+      tanggal_selesai: this.tanggal_selesai,
+      mode_prediksi: this.mode, // tambahkan ini
+      jumlah_ayam_awal: this.mode === "per_ayam" ? this.jumlah_ayam_awal || 1 : null,
+      file_id: this.file_id || "default",
+      prediksi: this.predictedDetail, // data prediksi per tanggal
+      total_karung: this.summary?.total_prediksi_karung || 0,
+      data_aktual: this.chartData?.aktual || null,
+      activity: `Prediksi ${this.mode} dari ${this.tanggal_mulai} sampai ${this.tanggal_selesai}` // log sederhana
+    };
 
-        await api.post("/riwayat", payload);
-      } catch (err) {
-        console.error("Gagal simpan riwayat:", err);
-      }
-    },
+    await api.post("/riwayat", payload);
+  } catch (err) {
+    console.error("Gagal simpan riwayat:", err);
+  }
+},
 
     downloadCSV() {
       const rows = this.predictedDetail.map(d => [d.date, d.value, d.karung]);
@@ -428,96 +458,152 @@ this.chartData = {
 </script>
 
 <style scoped>
-/* style tetap sama seperti sebelumnya */
 .container {
-  max-width: 900px;
+  max-width: 1400px; 
   margin: 0 auto;
-  padding-top: 10px;
+  padding: 20px 40px; 
+  margin-top: 0%;
+  text-align: center;
 }
 
 .title {
   text-align: center;
-  font-size: 22px;
+  font-size: 26px;
   font-weight: bold;
-  margin-bottom: 10px;
-  color: #0a660a;
+  margin-bottom: 20px;
+
+  background: linear-gradient(90deg, #2e7d32, #66bb6a);
+
+  /* standar property */
+  background-clip: text;
+
+  /* prefix untuk Chrome/Safari */
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+
+  /* fallback kalau gradient tidak jalan */
+  color: #2e7d32;
 }
 
+
+/* Form */
 .form-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
   justify-content: center;
   align-items: flex-end;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
+  background: #e8f5e9;
+  border: 1px solid #436644;
+  border-radius: 10px;
+  padding: 15px;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  min-width: 140px;
-  max-width: 180px;
+  min-width: 150px;
+  max-width: 200px;
   flex: 1 1 auto;
 }
 
-.full-width {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: center;
-}
-
 .form-group label {
-  margin-bottom: 4px;
-  font-weight: 500;
-  font-size: 13px;
+  margin-bottom: 5px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #2e7d32;
 }
 
+/* Input & select */
 .input {
-  padding: 6px 8px;
-  font-size: 13px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid #a5d6a7;
+  border-radius: 6px;
+  outline: none;
+  transition: 0.3s;
 }
 
+.input:focus {
+  border-color: #2e7d32;
+  box-shadow: 0 0 4px rgba(46, 125, 50, 0.5);
+}
+
+/* Button hijau */
 .btn {
-  padding: 8px 14px;
-  font-size: 13px;
-  background: #28a745;
+  padding: 10px 16px;
+  font-size: 14px;
+  background: linear-gradient(135deg, #2e7d32, #43a047);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  white-space: nowrap;
+  font-weight: 600;
+  transition: 0.3s;
 }
 
+.btn:hover {
+  background: linear-gradient(135deg, #1b5e20, #2e7d32);
+}
+
+/* Grafik */
 .chart-container {
-  margin-top: 10px;
+  margin-top: 20px;
 }
 
+/* Summary */
 .summary {
   margin-top: 32px;
   text-align: center;
+  padding: 16px;
+  background: #e8f5e9;
+  border: 1px solid #436644;
+  border-radius: 10px;
+}
+
+.summary h3 {
+  color: #2e7d32;
 }
 
 .summary-table {
   margin: 0 auto;
   margin-top: 12px;
   border-collapse: collapse;
-  width: 90%;
-  max-width: 900px;
+  width: 100%;       
+  max-width: 100%;   
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
 
-.summary-table th,
+
 .summary-table td {
-  border: 1px solid #ccc;
-  padding: 6px 10px;
-  font-size: 13px;
+  border: 1px solid #333;
+  padding: 8px 10px;
+  font-size: 16px;
   text-align: left;
 }
 
 .summary-table th {
-  background-color: #f5f5f5;
-  width: 60%;
+  background-color: #e8f5e9;
+  border: 1px solid #333;
+  color: #1b5e20;
+  width: 55%;
+}
+
+/* Download buttons */
+.download-buttons {
+  margin-top: 18px;
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+}
+
+.download-buttons .btn {
+  background: #43a047;
+}
+
+.download-buttons .btn:hover {
+  background: #2e7d32;
 }
 
 @media (max-width: 768px) {
@@ -539,23 +625,5 @@ this.chartData = {
     font-size: 12px;
   }
 }
-
-.download-buttons {
-  margin-top: 16px;
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-}
-
-.summary-card table td {
-  width: 60%;
-  text-align: left;
-  padding-left: 10px;
-}
-
-.summary-card table th {
-  width: 40%;
-  text-align: right;
-  padding-right: 10px;
-}
 </style>
+
