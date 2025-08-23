@@ -75,28 +75,32 @@ def init_db() -> None:
             nama_file VARCHAR(50) NULL,
             activity VARCHAR(255) NULL, -- log aktivitas
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- waktu dibuat
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
         );
         """)
         
-        # Tabel data_pakan
+        # Tabel data_pakan untuk simpan file CSV user
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS data_pakan (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
-            tanggal DATE NOT NULL,
-            nama_file VARCHAR(20) DEFAULT '',        
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            file_name VARCHAR(50) NOT NULL,
+            file_path VARCHAR(100) NOT NULL,
+            upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
         """)
+
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        print("✅ Database dan tabel riwayat siap digunakan!")
+        print("✅ Database dan tabel siap digunakan!")
 
     except mysql.connector.Error as e:
         print("❌ Gagal inisialisasi DB:", e)

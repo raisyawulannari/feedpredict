@@ -1,4 +1,4 @@
-<template>
+<template> 
   <div>
     <!-- NAVBAR -->
     <header class="navbar">
@@ -26,23 +26,13 @@
           <!-- ADMIN MENU -->
           <router-link v-if="isAdmin" :to="dashboardLink" class="nav-link">Dashboard</router-link>
           <router-link v-if="isAdmin" to="/admin/riwayat" class="nav-link">Riwayat User</router-link>
+          <router-link v-if="isAdmin" to="/admin/data-pakan" class="nav-link">Data Pakan</router-link>
           <router-link v-if="isAdmin" to="/admin/users" class="nav-link">Kelola User</router-link>
         </template>
       </nav>
 
-      <!-- NOTIFIKASI & USER INFO -->
+      <!-- USER INFO -->
       <div v-if="isLoggedIn" class="right-section">
-        <div class="notification-wrapper" ref="dropdownRef">
-          <button @click.stop="toggleDropdown" class="notification-btn">
-            🔔
-            <span v-if="notificationCount > 0" class="badge">{{ notificationCount }}</span>
-          </button>
-          <div v-if="showDropdown" class="notification-dropdown">
-            <p v-if="notifications.length === 0">Tidak ada notifikasi</p>
-            <p v-for="(notif, index) in notifications" :key="index">{{ notif }}</p>
-          </div>
-        </div>
-
         <div class="auth">
           <span class="username">Hi, {{ user.name }}</span>
           <a href="#" class="nav-link logout-link" @click.prevent="logout">Logout</a>
@@ -52,16 +42,13 @@
 
     <!-- MAIN CONTENT -->
     <main class="main-content">
-      <router-view
-        @login-success="setUser"
-        @update-notifikasi="handleUpdateNotifikasi"
-      />
+      <router-view @login-success="setUser" />
     </main>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { computed, watch, onMounted } from 'vue'
 import userStore from './store/user.js'
 import { useRouter } from 'vue-router'
 import logo from '@/assets/FEEDPREDICT.png'
@@ -70,71 +57,12 @@ const router = useRouter()
 const { userState: user, isLoggedIn, isAdmin, isUser, setUser, logout: logoutStore } = userStore
 const logoUrl = logo
 
-// NOTIFIKASI
-const notifications = ref([])
-const notificationCount = ref(0)
-const showDropdown = ref(false)
-const dropdownRef = ref(null)
-
-const toggleDropdown = () => { showDropdown.value = !showDropdown.value }
-const closeDropdownOnOutsideClick = (e) => {
-  if (dropdownRef.value && !dropdownRef.value.contains(e.target)) showDropdown.value = false
-}
-
-function handleUpdateNotifikasi(payload) {
-  const notifArray = []
-  if(payload && typeof payload === 'object') {
-    notifArray.push(`Stok Pakan: ${payload.stokKarung ?? '-'}`)
-    notifArray.push(`Jumlah Ayam: ${payload.jumlahAyam ?? '-'}`)
-    const hari = Number(payload.estimasiHari)
-    if(hari === 1) notifArray.push("Stok hampir habis, kurang dari 1 hari!")
-    else if(hari === 0) notifArray.push("Stok habis, segera tambah pakan!")
-    else if(!isNaN(hari)) notifArray.push(`Stok cukup untuk: ${hari} hari`)
-  }
-  notifications.value = notifArray
-  notificationCount.value = notifArray.length
-  localStorage.setItem('notifikasi', JSON.stringify(notifications.value))
-}
-
-// Sync user & notifikasi saat reload
-onMounted(() => {
-  const savedUser = localStorage.getItem('user')
-  if (savedUser) {
-    setUser(JSON.parse(savedUser))
-  }
-  // kalau gak ada user, biarin aja, biar bisa lihat Home dulu
-
-
-  const savedNotif = localStorage.getItem('notifikasi')
-  if(savedNotif) {
-    notifications.value = JSON.parse(savedNotif)
-    notificationCount.value = notifications.value.length
-  }
-
-  document.addEventListener('click', closeDropdownOnOutsideClick)
-})
-
-// Hapus event listener
-onBeforeUnmount(() => {
-  document.removeEventListener('click', closeDropdownOnOutsideClick)
-})
-
 // Dashboard link dinamis
 const dashboardLink = computed(() => isAdmin.value ? '/admin/dashboard' : '/user/dashboard')
-
-// Watch agar menu berubah langsung saat login/logout tanpa reload
-watch(isLoggedIn, (newVal) => {
-  if(!newVal) {
-    notifications.value = []
-    notificationCount.value = 0
-  }
-})
 
 // Logout
 function logout() {
   logoutStore()
-  notifications.value = []
-  notificationCount.value = 0
   router.push('/login')
 }
 
@@ -143,6 +71,14 @@ watch(user, (newUser) => {
   if(newUser) localStorage.setItem('user', JSON.stringify(newUser))
   else localStorage.removeItem('user')
 }, { deep: true })
+
+// Sync user saat reload
+onMounted(() => {
+  const savedUser = localStorage.getItem('user')
+  if (savedUser) {
+    setUser(JSON.parse(savedUser))
+  }
+})
 </script>
 
 <style scoped>
@@ -206,43 +142,6 @@ watch(user, (newUser) => {
   color: #a0352d;
 }
 .logout-link:hover { text-decoration: underline; }
-
-/* NOTIFIKASI */
-.notification-wrapper { position: relative; }
-.notification-btn {
-  background: #f3d1b0;
-  border: none;
-  cursor: pointer;
-  font-size: 1.2rem;
-  padding: 5px 10px;
-  border-radius: 5px;
-  position: relative;
-  transition: all 0.2s;
-}
-.notification-btn:hover { background: #eab788; }
-.badge {
-  position: absolute;
-  top: -5px;
-  right: -8px;
-  background: red;
-  color: white;
-  font-size: 0.7rem;
-  border-radius: 50%;
-  padding: 2px 5px;
-}
-.notification-dropdown {
-  position: absolute;
-  top: 35px;
-  right: 0;
-  background: #fff;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  width: 240px;
-  padding: 10px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-  z-index: 50;
-}
-.notification-dropdown p { font-size: 0.9rem; margin: 5px 0; color: #333; }
 
 /* MAIN CONTENT */
 .main-content {

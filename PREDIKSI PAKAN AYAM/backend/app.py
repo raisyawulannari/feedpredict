@@ -1,48 +1,58 @@
-# --- Warnings ---
-import pathlib
-import warnings
-from pydantic import BaseModel
-from statsmodels.tools.sm_exceptions import ValueWarning
-
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=ValueWarning)
-warnings.filterwarnings("ignore")  # Hati-hati, ini menonaktifkan semua peringatan
-
-# --- Standard Library ---
-import os
-import io
 import csv
+import hashlib
+import io
 import math
 import json
-import uuid
-import hashlib
-import traceback
-from datetime import date, datetime, timedelta
-from typing import List, Optional
+import os
+import re
+import json, math
+import shutil
 import secrets
-
-# --- Third-party Libraries ---
+import traceback
+from typing import List
+from sqlalchemy.orm import Session
+import uuid
+import warnings
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any
 import jwt
-import pandas as pd
 import numpy as np
+import pandas as pd
 from pmdarima import auto_arima
+from statsmodels.tools.sm_exceptions import ValueWarning
 from xhtml2pdf import pisa
 
-# --- FastAPI Related ---
 from fastapi import (
-    FastAPI, Form, Request, UploadFile, File, Depends, HTTPException, Header, Body, Path
+    FastAPI,
+    Request,
+    APIRouter,
+    UploadFile,
+    File,
+    Form,
+    Depends,
+    HTTPException,
+    Header,
+    Body,
+    Path,
+    Query
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.security import OAuth2PasswordBearer
-
-# --- Local Modules ---
+from pydantic import BaseModel
+from fastapi import Body
+import mysql.connector
 from auth import router as auth_router
 from database import get_db_connection
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=ValueWarning)
+warnings.filterwarnings("ignore")
 
+
+# --------- FastAPI App ---------
 app = FastAPI()
 
 app.add_middleware(
@@ -53,36 +63,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-#=================
-# class datapakan
-#=================
-class DataPakan(BaseModel):
-    tanggal_mulai: str
-    tanggal_selesai: str
-    jumlah_ayam_awal: int
-    file_id: str = None
-
-data_pakan_list: List[dict] = []
-
-CSV_PATH = "data/data_pakan_ayam.csv"
-DATA_DIR = "uploaded_csv"
-META_FILE = "metadata.json"
-
-file_storage = []
-
-if os.path.exists(META_FILE):
-    with open(META_FILE, "r") as f:
-        file_storage = json.load(f)
-
-# ----------------------------
-# Fungsi save_metadata ditambahkan di sini
-# ----------------------------
-def save_metadata():
-    os.makedirs(DATA_DIR, exist_ok=True)  # pastikan folder ada
-    with open(META_FILE, "w", encoding="utf-8") as f:
-        json.dump(file_storage, f, ensure_ascii=False, indent=2)
-
-# Tentukan folder static hasil build Vue=
+# --- Tentukan folder static hasil build Vue ---
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 
 # Mount static folder
@@ -93,12 +74,12 @@ def ping():
     return {"msg": "pong"}
 
 
-# JWT Config
+# --------- JWT Config ---------
 SECRET_KEY = os.environ.get("SECRET_KEY", "ini_kunci_rahasia_default")
 ALGORITHM = "HS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
-# Schemas
+# --------- Schemas ---------
 class RegisterSchema(BaseModel):
     name: str
     email: str
@@ -115,7 +96,8 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=1
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-# Dependency Cek User
+# --------- Dependency Cek User ---------
+
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -128,9 +110,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Token tidak valid")
     
-#========================
-# Endpoint Register Akun
-#========================
+#===================
+# Endpoint Register
+#===================
 @app.post("/api/register")
 def register(data: RegisterSchema):
     if len(data.password) != 8:
@@ -157,9 +139,9 @@ def register(data: RegisterSchema):
 
     return {"message": "User berhasil didaftarkan!"}
 
-#=====================
-# Endpoint Login Akun
-#=====================
+#================
+# Endpoint Login
+#================
 @app.post("/api/login")
 def login(data: LoginSchema):
     conn = get_db_connection()
@@ -185,9 +167,37 @@ def login(data: LoginSchema):
         "name": user["name"]
     }
 
-#=====================
+# --- Schema untuk request reset password ---
+class ResetPasswordSchema(BaseModel):
+    email: str
+    new_password: str
+
+@app.post("/api/reset-password")
+def reset_password(data: ResetPasswordSchema):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # cek apakah email ada
+    cursor.execute("SELECT * FROM users WHERE email=%s", (data.email,))
+    user = cursor.fetchone()
+
+    if not user:
+        cursor.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Email tidak ditemukan")
+
+    # update password
+    cursor.execute("UPDATE users SET password=%s WHERE email=%s", (data.new_password, data.email))
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return {"message": "Password berhasil direset"}
+
+#====================
 # Endpoint Dashboard 
-#=====================
+#====================
 @app.get("/api/dashboard")
 def dashboard(user: dict = Depends(get_current_user)):
     return {"msg": "Ini halaman dashboard", "user_id": user["user_id"], "role": user["role"]}
@@ -211,9 +221,9 @@ def admin_dashboard(user: dict = Depends(get_current_user)):
     cursor.execute("SELECT COUNT(*) AS total FROM users")
     users_count = cursor.fetchone()["total"]
 
-#============================================
-# Ambil semua user (admin only) table users
-#============================================
+#===========================
+# Ambil semua user (admin only)
+#===========================
 @app.get("/api/admin/users")
 def get_users(user=Depends(get_current_user)):
     if user["role"] != "admin":
@@ -229,9 +239,10 @@ def get_users(user=Depends(get_current_user)):
         if cursor: cursor.close()
         if conn: conn.close()
 
-#===========================================
-# Update role user (admin only) table users
-#===========================================
+
+#==================
+# Update role user
+#==================
 @app.put("/api/admin/users/{user_id}")
 def update_user_role(user_id: int, payload: dict, user=Depends(get_current_user)):
     if user["role"] != "admin":
@@ -251,9 +262,9 @@ def update_user_role(user_id: int, payload: dict, user=Depends(get_current_user)
         if cursor: cursor.close()
         if conn: conn.close()
 
-#======================================
-# Hapus user (admin only) table users
-#======================================
+#============
+# Hapus user
+#============
 @app.delete("/api/admin/users/{user_id}")
 def delete_user(user_id: int, user=Depends(get_current_user)):
     if user["role"] != "admin":
@@ -296,13 +307,8 @@ def get_admin_riwayat(user=Depends(get_current_user)):
         if conn:
             conn.close()
 
-#===============================
-# Endpoint Admin Riwayat detail
-#===============================
 @app.get("/api/admin/riwayat/{id}/detail")
 def get_admin_riwayat_detail(id: int, user=Depends(get_current_user)):
-    import json
-    from datetime import datetime
     conn = None
     cursor = None
     try:
@@ -440,9 +446,6 @@ def get_admin_riwayat_detail(id: int, user=Depends(get_current_user)):
         if conn:
             conn.close()
 
-#===============================
-# Endpoint admin hapus riwayat 
-#===============================
 @app.delete("/api/admin/riwayat/{riwayat_id}")
 def delete_admin_riwayat(riwayat_id: int, user=Depends(get_current_user)):
     conn = cursor = None
@@ -467,6 +470,7 @@ def delete_admin_riwayat(riwayat_id: int, user=Depends(get_current_user)):
         if conn:
             conn.close()
 
+
 # ===============================
 # Fungsi sanitize JSON
 # ===============================
@@ -482,34 +486,32 @@ def sanitize_json(obj):
         return str(obj)
 
 def get_db_connection():
-    import mysql.connector
     return mysql.connector.connect(
         host="localhost", user="root", password="", database="prediksi_db"
     )
 
 # ===============
-# Simpan riwayat 
-# ===============
+# Simpan riwayat
+# ==============
 @app.post("/riwayat")
 async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_user)):
-    import traceback, math, json
-    from datetime import datetime
     conn = cursor = None
     try:
+        # --- Validasi user ---
         current_user_id = current_user.get("user_id")
         if not current_user_id:
             raise HTTPException(status_code=401, detail="User tidak valid")
 
+        # --- Ambil data dari request ---
         prediksi_list = data.get("prediksi", [])
         aktual_list = data.get("data_aktual", [])
         mode_prediksi = data.get("mode_prediksi", "per_ayam")
         asal_data = data.get("asal_data") or "Default"
         nama_file = data.get("nama_file") or "Default"
 
-        # --- Jumlah ayam awal hanya dipakai per_ayam ---
+        # --- Hitung jumlah ayam awal ---
         jumlah_ayam_awal_input = int(data.get("jumlah_ayam_awal") or 0)
         if mode_prediksi == "per_ayam" and jumlah_ayam_awal_input <= 0:
-            # jika input kosong, ambil dari prediksi_list (fallback)
             jumlah_ayam_awal_input = max(
                 [int(p.get("ayam_hidup", 0)) for p in prediksi_list if isinstance(p, dict)],
                 default=0
@@ -522,7 +524,7 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
         tanggal_selesai = datetime.fromisoformat(data.get("tanggal_selesai"))
         durasi = (tanggal_selesai - tanggal_mulai).days + 1
 
-        # --- Standarisasi prediksi dengan skip kg <= 0 ---
+        # --- Standarisasi prediksi ---
         standar_prediksi = []
         for p in prediksi_list:
             if isinstance(p, dict):
@@ -530,12 +532,12 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
                     per_ayam = float(p.get("per_ayam", 0))
                     ayam_hidup = int(p.get("ayam_hidup", jumlah_ayam_awal_input))
                     kg = per_ayam * ayam_hidup
-                else:  # per_periode
+                else:
                     per_ayam = None
                     ayam_hidup = None
-                    kg = float(p.get("kg") or p.get("y") or 0)
-                if kg <= 0:
-                    continue
+                    kg = round(float(p.get("kg") or p.get("y") or 0), 2)
+                    y = round(float(p.get("y") or kg), 2)
+                if kg <= 0: continue
                 x = p.get("x") or p.get("date") or "-"
                 periode = p.get("periode")
             else:
@@ -547,73 +549,80 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
                     per_ayam = None
                     ayam_hidup = None
                     kg = float(p if p is not None else 0.0)
-                if kg <= 0:
-                    continue
+                if kg <= 0: continue
                 x = "-"
                 periode = None
 
             standar_prediksi.append({
                 "x": x,
-                "y": kg,
+                "y": kg if mode_prediksi == "per_ayam" else y,
                 "kg": kg,
                 "ayam_hidup": ayam_hidup,
                 "per_ayam": per_ayam,
                 "periode": periode
             })
 
-        # --- Standarisasi data aktual dengan skip kg <= 0 ---
+        if not standar_prediksi:
+            raise HTTPException(status_code=400, detail="Prediksi kosong")
+
+        # --- Standarisasi data aktual ---
         standar_aktual = []
         for a in aktual_list:
             if isinstance(a, dict):
                 raw_kg = a.get("kg") or a.get("y") or a.get("stok") or 0
-                kg = float(raw_kg) if raw_kg is not None else 0.0
-                if kg <= 0:
-                    continue
+                kg = round(float(raw_kg), 2)
+                if kg <= 0: continue
                 x = a.get("x") or a.get("date") or "-"
                 periode = a.get("periode")
             else:
-                kg = float(a) if a is not None else 0.0
-                if kg <= 0:
-                    continue
+                kg = float(a if a is not None else 0.0)
+                if kg <= 0: continue
                 x = "-"
                 periode = None
 
             standar_aktual.append({
                 "x": x,
-                "y": kg,
+                "y": round(float(a.get("y") or kg), 2) if isinstance(a, dict) else kg,
                 "kg": kg,
                 "periode": periode
             })
 
-        # --- Pastikan prediksi ada sebelum insert ---
-        if not standar_prediksi:
-            raise HTTPException(status_code=400, detail="Prediksi kosong, tidak bisa disimpan")
-
-        # --- Hitung total pakan dan total karung ---
-        total_pakan = sum([p["kg"] for p in standar_prediksi])
+        # --- Hitung total pakan & karung ---
+        total_pakan = round(sum([p["kg"] for p in standar_prediksi]), 2)
         total_karung = math.ceil(total_pakan / 50)
-        total_pakan = float(total_pakan)
-        total_karung = int(total_karung)
-
-        # --- Gunakan input user untuk jumlah ayam awal di DB (None untuk per_periode) ---
         jumlah_ayam_awal_db = jumlah_ayam_awal_input if mode_prediksi == "per_ayam" else None
+        activity = data.get("activity") or f"Prediksi {mode_prediksi} dari {tanggal_mulai.date()} sampai {tanggal_selesai.date()}"
+        mape = data.get("mape") or None
 
         # --- Simpan ke DB ---
         conn = get_db_connection()
         cursor = conn.cursor(buffered=True)
 
-        activity = data.get("activity") or "Prediksi disimpan"
-        mape = data.get("mape") or None
+        # --- Cek duplikat ---
+        cursor.execute("""
+            SELECT id FROM riwayat 
+            WHERE user_id=%s AND tanggal_mulai=%s AND tanggal_selesai=%s
+            AND mode_prediksi=%s AND nama_file=%s
+        """, (
+            current_user_id,
+            tanggal_mulai.strftime("%Y-%m-%d"),
+            tanggal_selesai.strftime("%Y-%m-%d"),
+            mode_prediksi,
+            nama_file
+        ))
+        existing = cursor.fetchone()
+        if existing:
+            return {"message": "Riwayat sudah ada, tidak disimpan lagi", "riwayat_id": existing[0]}
 
-        cursor.execute(
-            """
-            INSERT INTO riwayat
-            (user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, data_aktual,
-            total_pakan_kg, total_karung, mode_prediksi, jumlah_ayam_awal, activity,
-            mape, asal_data, nama_file, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-            """,
-            (
+        # --- Insert baru ---
+        try:
+            cursor.execute("""
+                INSERT INTO riwayat
+                (user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, data_aktual,
+                total_pakan_kg, total_karung, mode_prediksi, jumlah_ayam_awal, activity,
+                mape, asal_data, nama_file, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            """, (
                 current_user_id,
                 tanggal_mulai.strftime("%Y-%m-%d"),
                 tanggal_selesai.strftime("%Y-%m-%d"),
@@ -628,19 +637,14 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
                 mape,
                 asal_data,
                 nama_file
-            )
-        )
-
-        riwayat_id = cursor.lastrowid
-        conn.commit()
-
-        print(f"✅ Riwayat ID {riwayat_id} berhasil disimpan!")
-
-        return {"message": "Riwayat berhasil disimpan", "riwayat_id": riwayat_id}
-
-    except Exception as e:
-        traceback.print_exc()
-        return {"error": str(e)}
+            ))
+            conn.commit()
+            riwayat_id = cursor.lastrowid
+            print(f"✅ Riwayat ID {riwayat_id} berhasil disimpan!")
+            return {"message": "Riwayat berhasil disimpan", "riwayat_id": riwayat_id}
+        except Exception as e:
+            conn.rollback()
+            raise HTTPException(status_code=500, detail=f"Error menyimpan riwayat: {str(e)}")
 
     finally:
         if cursor:
@@ -649,13 +653,12 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
             conn.close()
 
 
-# ========================
-# Ambil semua riwayat user 
-# ========================
+
+# ===============================
+# Ambil semua riwayat user (lengkap)
+# ===============================
 @app.get("/riwayat")
 async def get_riwayat(current_user: dict = Depends(get_current_user)):
-    import json, math
-
     conn = cursor = None
     try:
         current_user_id = current_user.get("user_id")
@@ -748,14 +751,11 @@ async def get_riwayat(current_user: dict = Depends(get_current_user)):
         if conn: conn.close()
 
 
-# =====================
-# Ambil detail riwayat
-# =====================
+# ===============================
+# Ambil detail riwayat (lengkap)
+# ===============================
 @app.get("/riwayat/{id}/detail")
 async def get_riwayat_detail(id: int, current_user: dict = Depends(get_current_user)):
-    import json, math
-    from fastapi.responses import JSONResponse
-
     conn = cursor = None
     try:
         current_user_id = current_user.get("user_id")
@@ -908,9 +908,9 @@ async def get_riwayat_detail(id: int, current_user: dict = Depends(get_current_u
         if cursor: cursor.close()
         if conn: conn.close()
 
-#=======================
-# delete riwayat (user)
-#========================
+#================
+# delete riwayat
+#================
 @app.delete("/riwayat")
 async def hapus_semua_riwayat(current_user: dict = Depends(get_current_user)):
     user_id = current_user.get("user_id")
@@ -933,9 +933,9 @@ async def hapus_semua_riwayat(current_user: dict = Depends(get_current_user)):
         if conn:
             conn.close()
 
-# =========================================
-# Hapus riwayat tertentu milik user (user)
-# =========================================
+# ===============================
+# Hapus riwayat tertentu milik user
+# ===============================
 @app.delete("/riwayat/{riwayat_id}")
 async def hapus_riwayat(
     riwayat_id: int = Path(..., description="ID riwayat yang ingin dihapus"),
@@ -971,7 +971,34 @@ async def hapus_riwayat(
         if conn:
             conn.close()
             
+#=================
+# class datapakan
+#=================
+class DataPakan(BaseModel):
+    tanggal_mulai: str
+    tanggal_selesai: str
+    jumlah_ayam_awal: int
+    file_id: str = None
 
+data_pakan_list: List[dict] = []
+
+CSV_PATH = "data/data_pakan_ayam.csv"
+DATA_DIR = "data/uploaded_csv"
+META_FILE = "metadata.json"
+
+file_storage = []
+
+if os.path.exists(META_FILE):
+    with open(META_FILE, "r") as f:
+        file_storage = json.load(f)
+
+# ----------------------------
+# Fungsi save_metadata ditambahkan di sini
+# ----------------------------
+def save_metadata():
+    os.makedirs(DATA_DIR, exist_ok=True)  # pastikan folder ada
+    with open(META_FILE, "w", encoding="utf-8") as f:
+        json.dump(file_storage, f, ensure_ascii=False, indent=2)
 
 
 def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_prediksi):
@@ -1016,29 +1043,31 @@ def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_predi
             conn.close()
         return False
 
-def load_data(file_id=None):
-    print("load_data dipanggil dengan file_id:", file_id)
-    
-    if not file_id or file_id == "default":
-        file_path = CSV_PATH  # pakai data/data_pakan_ayam.csv
-    else:
-        file_path = os.path.join(DATA_DIR, str(file_id) + ".csv")
+#=================
+# FUNGSI LOAD DATA
+#=================
+def load_data(file_id=None, user_id=None):
+    print("load_data dipanggil dengan file_id:", file_id, "user_id:", user_id)
 
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File data CSV '{file_path}' tidak ditemukan.")
+    if not file_id or file_id == "default":
+        file_path = CSV_PATH  # pakai data default
+    else:
+        file_path = os.path.join("data", "uploaded_csv", str(user_id), f"{file_id}.csv")
+        if not os.path.exists(file_path):
+            print(f"File '{file_path}' tidak ditemukan, pakai CSV default")
+            file_path = CSV_PATH
 
     df_raw = pd.read_csv(file_path)
     df = df_raw.copy()
     df.rename(columns=lambda x: x.strip().lower(), inplace=True)
 
-    # Ganti nama bulan dari Indonesia ke English
+    # --- Ganti nama bulan Indonesia ke English ---
     ind_to_eng_month = {
         'Januari': 'January', 'Februari': 'February', 'Maret': 'March',
         'April': 'April', 'Mei': 'May', 'Juni': 'June',
         'Juli': 'July', 'Agustus': 'August', 'September': 'September',
         'Oktober': 'October', 'November': 'November', 'Desember': 'December'
     }
-
     df['tanggal'] = df['tanggal'].astype(str)
     for ind, eng in ind_to_eng_month.items():
         df['tanggal'] = df['tanggal'].str.replace(ind, eng, regex=False)
@@ -1049,7 +1078,6 @@ def load_data(file_id=None):
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
     df = df[df['pakan_pakai'] > 0]
-
     df.dropna(subset=['tanggal', 'pakan_pakai', 'jumlah_ayam', 'jumlah_ayam_mati'], inplace=True)
     df.sort_values('tanggal', inplace=True)
     df.reset_index(drop=True, inplace=True)
@@ -1057,8 +1085,8 @@ def load_data(file_id=None):
     if 'periode' in df.columns:
         df['periode'] = df['periode'].replace(["", "nan", "NaN", "None"], np.nan)
 
-        print(f"load_data: {len(df)} baris valid dari {file_path}")
-        return df
+    print(f"load_data: {len(df)} baris valid dari {file_path}")
+    return df
 
 
 def get_periode_boundaries(df):
@@ -1128,9 +1156,6 @@ def hitung_mape_kg(prediksi, aktual):
 
     return round((error_sum / n) * 100, 2)
 
-#==============================
-# Mencari Model Arima Terbaik
-#==============================
 def train_arima(series):
     if len(series) < 10 or series.nunique() <= 1:
         raise ValueError("Data tidak cukup atau terlalu seragam untuk ARIMA.")
@@ -1148,174 +1173,308 @@ def train_arima(series):
     )
     return model
 
-# =======================
-# FITUR DATA PAKAN (user)
-# =======================
-DATA_DIR = "data/uploaded_csv" 
-os.makedirs(DATA_DIR, exist_ok=True)
-
-# ==============================
-# Upload CSV
-# ==============================
-@app.post("/upload_csv")
-async def upload_csv(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    # validasi ekstensi
-    if not file.filename.lower().endswith(".csv"):
-        return JSONResponse(status_code=400, content={"error": "Hanya file CSV yang diperbolehkan"})
-
-    # normalisasi nama file agar aman
-    filename = pathlib.Path(file.filename.strip()).name
-
-    # cek nama file sudah ada untuk user
+#==================================
+# ENDPOINT UNTUK FITURE DATA PAKAN
+#==================================
+# Ambil semua data pakan (admin)
+@app.get("/api/admin/data-pakan")
+def get_all_data_pakan():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute(
-        "SELECT COUNT(*) AS count FROM data_pakan WHERE user_id=%s AND nama_file=%s",
-        (current_user["user_id"], filename)
-    )
-    result = cursor.fetchone()
-    if result.get("count", 0) > 0:
+    cursor.execute("""
+        SELECT dp.id, dp.user_id, u.name AS user_name, dp.file_name, dp.file_path, dp.upload_date
+        FROM data_pakan dp
+        JOIN users u ON dp.user_id = u.id
+        ORDER BY dp.upload_date DESC
+    """)
+    result = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return result
+
+# Hapus data pakan
+@app.delete("/api/admin/data-pakan/{id}")
+def delete_data_pakan(id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # ambil file_path dulu
+    cursor.execute("SELECT file_path FROM data_pakan WHERE id=%s", (id,))
+    row = cursor.fetchone()
+    if not row:
         cursor.close()
         conn.close()
-        return JSONResponse(status_code=400, content={"error": f"Nama file '{filename}' sudah ada, gunakan file lain"})
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    file_path = row[0]
+    
+    # hapus file fisik
+    if file_path and os.path.exists(file_path):
+        os.remove(file_path)
+    
+    # hapus dari database
+    cursor.execute("DELETE FROM data_pakan WHERE id=%s", (id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return {"message": "Data pakan berhasil dihapus"}
 
-    # simpan file fisik
+#======================
+# Folder upload (user)
+#=====================
+UPLOAD_DIR = "uploads/csv"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# ========================
+# HELPER FUNCTIONS
+# ========================
+def _secure_filename(name: str) -> str:
+    base = os.path.basename(name)
+    base = re.sub(r"[^A-Za-z0-9_.-]", "_", base)
+    if not base.endswith(".csv"):
+        base += ".csv"
+    return base
+
+def _unique_path(directory: str, filename: str) -> str:
+    name, ext = os.path.splitext(filename)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate = f"{name}_{ts}{ext}"
+    return os.path.join(directory, candidate)
+
+def get_db_connection():
+    import mysql.connector
+    return mysql.connector.connect(
+        host="localhost", user="root", password="", database="prediksi_db"
+    )
+
+# ========================
+# UPLOAD CSV LANGSUNG (Frontend → DB)
+# ========================
+@app.post("/data_pakan/upload")
+async def upload_csv(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Hanya file CSV yang diperbolehkan")
+
+    # Baca CSV
     try:
-        file_path = os.path.join(DATA_DIR, filename)
-        with open(file_path, "wb") as f:
-            f.write(await file.read())
+        df = pd.read_csv(file.file)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Gagal menyimpan file: {str(e)}"})
+        raise HTTPException(status_code=400, detail=f"Gagal membaca CSV: {e}")
 
-    # simpan metadata ke db
+    # Validasi kolom wajib
+    required_columns_alias = {
+        "tanggal": ["tanggal", "date"],
+        "jumlah_ayam_awal": ["jumlah_ayam_awal", "jumlah_ayam", "jml_ayam"],
+        "Pakan_Pakai": ["pakan_kg", "pakan", "pakankg", "pakanKg", "pakan_", "PakanKG", "pakan_Pakai", "Pakan_Pakai", "PakanPakai"],
+        "jumlah_ayam_mati": ["jumlah_ayam_mati", "ayam_mati", "mati", "ayam_mati"]
+    }
+
+    column_map = {}
+    for key, aliases in required_columns_alias.items():
+        match = next((c for c in df.columns if c.lower() in [a.lower() for a in aliases]), None)
+        if match:
+            column_map[key] = match
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Kolom wajib hilang: '{key}' (cari salah satu dari: {', '.join(aliases)})"
+            )
+
+    # Validasi jumlah baris minimal
+    if len(df) < 30:
+        raise HTTPException(status_code=400, detail=f"Jumlah baris minimal 30, tapi file hanya ada {len(df)} baris")
+
+    # Validasi tipe data
+    for idx, row in df.iterrows():
+        try:
+            pd.to_datetime(row[column_map["tanggal"]])
+        except:
+            raise HTTPException(status_code=400, detail=f"Baris {idx+1}: kolom 'tanggal' harus format tanggal valid")
+        for col in ["jumlah_ayam_awal", "Pakan_Pakai", "jumlah_ayam_mati"]:
+            try:
+                float(row[column_map[col]])
+            except:
+                raise HTTPException(status_code=400, detail=f"Baris {idx+1}: kolom '{col}' harus angka")
+
+    # Simpan file
+    safe_filename = _secure_filename(file.filename)
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    df.to_csv(file_path, index=False)
+
+    # Simpan info ke database (termasuk file_path!)
+    conn = get_db_connection()
+    cursor = conn.cursor()
     try:
-        cursor.execute("""
-            INSERT INTO data_pakan (user_id, tanggal, nama_file)
-            VALUES (%s, %s, %s)
-        """, (current_user["user_id"], date.today(), filename))
+        cursor.execute(
+            "INSERT INTO data_pakan (user_id, file_name, file_path, upload_date) VALUES (%s, %s, %s, NOW())",
+            (current_user["user_id"], safe_filename, file_path)
+        )
         conn.commit()
-    except Exception as e:
-        conn.rollback()
-        return JSONResponse(status_code=500, content={"error": str(e)})
     finally:
         cursor.close()
         conn.close()
 
-    return {"status": "sukses", "nama_file": filename}
+    return {"message": "CSV berhasil diupload", "file_name": safe_filename}
 
-# ===========================
-# List CSV di fitur data pakan
-# ===========================
+# ========================
+# GET ALL DATA PAKAN
+# ========================
+@app.get("/data_pakan/list")
+async def get_data_pakan(current_user: dict = Depends(get_current_user)):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT id, file_name, upload_date FROM data_pakan WHERE user_id = %s ORDER BY upload_date DESC",
+            (current_user["user_id"],)  # Hanya ambil data milik user ini
+        )
+        rows = cursor.fetchall()
+        return rows or []
+    finally:
+        cursor.close()
+        conn.close()
+
+# ========================
+# READ CSV BY UPLOAD ID
+# ========================
+@app.get("/data_pakan/{upload_id}/read_csv")
+async def read_csv(upload_id: int, current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT file_path FROM data_pakan WHERE id=%s AND user_id=%s",
+            (upload_id, current_user["user_id"])
+        )
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="File tidak ditemukan atau bukan milik Anda.")
+
+    file_path = row["file_path"]
+    if not file_path or ".." in file_path or not file_path.startswith(UPLOAD_DIR) or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File tidak ada di disk atau path tidak valid.")
+
+    try:
+        df = pd.read_csv(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal membaca CSV: {e}")
+
+    rows = df.astype(object).astype(str).values.tolist()
+    return {"headers": list(df.columns.astype(str)), "rows": rows[:200] if rows else []}
+
+# ========================
+# UPDATE DATA PAKAN (ubah nama file)
+# ========================
+
+@app.put("/data_pakan/{id}")
+async def update_data_pakan(
+    id: int,
+    file_name: str = Form(...),                  # <-- pakai Form, bukan Body
+    file: UploadFile | None = File(None),        # <-- opsional, kalau mau ganti CSV juga
+    current_user: dict = Depends(get_current_user)
+):
+    safe_name = _secure_filename(file_name)
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Ambil file_path lama
+        cursor.execute("SELECT file_path FROM data_pakan WHERE id=%s AND user_id=%s", (id, current_user["user_id"]))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan atau bukan milik Anda.")
+        
+        old_path = row["file_path"]
+        new_path = os.path.join(UPLOAD_DIR, safe_name)
+
+        # Ganti file lama dengan file baru jika ada upload baru
+        if file:
+            try:
+                df = pd.read_csv(file.file)
+                df.to_csv(new_path, index=False)
+                # hapus file lama
+                if old_path and os.path.exists(old_path):
+                    os.remove(old_path)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Gagal update CSV: {e}")
+        else:
+            # Kalau cuma ganti nama file
+            if old_path and os.path.exists(old_path):
+                os.rename(old_path, new_path)
+
+        # Update DB
+        cursor.execute(
+            "UPDATE data_pakan SET file_name=%s, file_path=%s WHERE id=%s AND user_id=%s",
+            (safe_name, new_path, id, current_user["user_id"])
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {"message": "Data berhasil diupdate.", "file_name": safe_name}
+
+# ========================
+# DELETE DATA PAKAN
+# ========================
+@app.delete("/data_pakan/{id}")
+async def delete_data_pakan(id: int) -> Dict[str, str]:
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT file_path FROM data_pakan WHERE id=%s", (id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Data tidak ditemukan.")
+
+        if row["file_path"] and os.path.exists(row["file_path"]):
+            try:
+                os.remove(row["file_path"])
+            except Exception:
+                pass
+
+        cursor.execute("DELETE FROM data_pakan WHERE id=%s", (id,))
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    return {"message": "Data berhasil dihapus."}
+
+#=======================
+# untuk di prediksi.vue 
+#=======================
 @app.get("/list_csv_files")
 async def list_csv_files(current_user: dict = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT id, nama_file, tanggal, created_at
-        FROM data_pakan
-        WHERE user_id = %s
-        ORDER BY created_at DESC
-    """, (current_user["user_id"],))
-    files = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return {"files": files}
-
-# ==============================
-# Update CSV
-# ==============================
-@app.put("/update_csv/{file_id}")
-async def update_csv(file_id: int, file: UploadFile = File(None), current_user: dict = Depends(get_current_user)):
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-
     try:
-        # ambil data lama
         cursor.execute(
-            "SELECT nama_file FROM data_pakan WHERE id=%s AND user_id=%s",
-            (file_id, current_user["user_id"])
+            "SELECT id, file_name, upload_date FROM data_pakan WHERE user_id = %s ORDER BY upload_date DESC",
+            (current_user["user_id"],)
         )
-        row = cursor.fetchone()
-        if not row:
-            return JSONResponse(status_code=404, content={"error": "Data tidak ditemukan"})
-
-        old_filename = row["nama_file"]
-
-        if file:
-            # validasi ekstensi CSV
-            if not file.filename.lower().endswith(".csv"):
-                return JSONResponse(status_code=400, content={"error": "Hanya file CSV yang diperbolehkan"})
-
-            new_filename = pathlib.Path(file.filename.strip()).name
-
-            # cek duplikat nama file
-            cursor.execute(
-                "SELECT COUNT(*) AS count FROM data_pakan WHERE user_id=%s AND nama_file=%s AND id != %s",
-                (current_user["user_id"], new_filename, file_id)
-            )
-            result = cursor.fetchone()
-            if result.get("count", 0) > 0:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": f"Nama file '{new_filename}' sudah ada, gunakan file lain"}
-                )
-
-            # hapus file lama jika ada
-            old_path = os.path.join(DATA_DIR, old_filename)
-            if os.path.exists(old_path):
-                try:
-                    os.remove(old_path)
-                except Exception as e:
-                    print(f"WARNING: gagal hapus file lama: {e}")
-
-            # simpan file baru
-            try:
-                file_path = os.path.join(DATA_DIR, new_filename)
-                with open(file_path, "wb") as f:
-                    f.write(await file.read())
-            except Exception as e:
-                return JSONResponse(status_code=500, content={"error": f"Gagal menyimpan file baru: {str(e)}"})
-
-            # update database
-            cursor.execute("""
-                UPDATE data_pakan
-                SET nama_file=%s
-                WHERE id=%s AND user_id=%s
-            """, (new_filename, file_id, current_user["user_id"]))
-            conn.commit()
-
-            return {"status": "sukses", "nama_file": new_filename}
-
-        # jika tidak ada file baru, return data lama
-        return {"status": "tidak ada perubahan", "nama_file": old_filename}
-
+        files = cursor.fetchall()
+        # ubah key supaya Vue bisa pakai camelCase
+        files_vue = [
+            {
+                "id": f["id"],
+                "fileName": f["file_name"],
+                "uploadDate": f["upload_date"].strftime("%Y-%m-%d %H:%M:%S")
+            } for f in files
+        ]
+        return {"files": files_vue}
     finally:
         cursor.close()
         conn.close()
 
-#===============================
-# Delete CSV di fitur data pakan
-#===============================
-@app.delete("/delete_csv/{nama_file}")
-async def delete_csv(nama_file: str, current_user: dict = Depends(get_current_user)):
-    file_path = os.path.join(DATA_DIR, nama_file)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+# =========================================
+# Download template CSV di fitur data pakan
+# =========================================
+DATA_DIR = "static/template/"
+os.makedirs(DATA_DIR, exist_ok=True)
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        DELETE FROM data_pakan
-        WHERE user_id = %s AND nama_file = %s
-    """, (current_user["user_id"], nama_file))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return {"status": "Berhasil dihapus"}
-
-#===========================================
-# Download TEMPLATE CSV DI FITIR DATA PAKAN
-#===========================================
 @app.get("/download_csv/{nama_file}")
 async def download_csv(nama_file: str, current_user: dict = Depends(get_current_user)):
     user_id = current_user["user_id"]
@@ -1336,11 +1495,31 @@ async def download_csv(nama_file: str, current_user: dict = Depends(get_current_
     df = pd.DataFrame(rows)
     file_path = os.path.join(DATA_DIR, f"{nama_file}_{user_id}.csv")
     df.to_csv(file_path, index=False)
-    return FileResponse(file_path, filename=f"{nama_file}.csv", media_type="text/csv")
+    return FileResponse(file_path, filename=f"{nama_file}.csv", media_type="text/csv")    
 
-#================================
-#  ENDPOINT PREDIKSI PER PERIODE
-#================================
+# ===========================
+# Download template Excel
+# ===========================
+@app.get("/download_template_excel")
+async def download_template_excel():
+    file_path = os.path.join(DATA_DIR, "template_data_pakan.xlsx")
+    if not os.path.exists(file_path):
+        return JSONResponse(status_code=404, content={"error": "File Excel tidak ditemukan"})
+
+    return FileResponse(
+        file_path,
+        filename="template_data_pakan.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    
+# ===== Endpoint predict_periode ===== 
+def get_file_name(file_id, user_id):
+    # cek file di folder uploads user
+    file_path = f"static/uploads/{user_id}/{file_id}.csv"
+    if os.path.exists(file_path):
+        return os.path.basename(file_path)  # ambil nama file.csv
+    return "Default"
+
 @app.post("/predict_periode")
 async def predict_periode(request: Request, current_user: dict = Depends(get_current_user)):
     import traceback, math, json
@@ -1358,8 +1537,8 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         tanggal_mulai_str = body.get("tanggal_mulai")
         tanggal_selesai_str = body.get("tanggal_selesai")
         file_id = body.get("file_id")
-        asal_data = body.get("asal_data", "Default")
-        nama_file = body.get("nama_file", "Default")
+        asal_data = "User Upload" if file_id != "default" else "Default"
+        nama_file = get_file_name(file_id, user_id)
         mode = "per_periode"
 
         if not tanggal_mulai_str or not tanggal_selesai_str:
@@ -1369,8 +1548,8 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         tanggal_selesai = datetime.strptime(tanggal_selesai_str, "%Y-%m-%d")
         n_periods = (tanggal_selesai - tanggal_mulai).days + 1
 
-        # --- Load CSV ---
-        df = load_data(file_id=file_id)
+        # --- Load CSV user / default ---
+        df = load_data(file_id=file_id, user_id=user_id)
         if df.empty:
             return JSONResponse(status_code=400, content={"error": "Data CSV kosong"})
         df['tanggal'] = pd.to_datetime(df['tanggal'])
@@ -1421,7 +1600,7 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         )
 
         # --- Print debug terminal ---
-        print("=== PREDIKSI PERIODE ===")
+        print("====================== PREDIKSI PERIODE ======================")
         print(f"User ID: {user_id}")
         print(f"Tanggal mulai: {tanggal_mulai_str}")
         print(f"Tanggal selesai: {tanggal_selesai_str}")
@@ -1433,75 +1612,41 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         print(f"Total Karung (50kg): {total_karung} karung")
         print("Catatan:")
         print(catatan)
-        print("====================")
+        print("============================================================")
 
         # --- Simpan/update ke DB ---
         riwayat_id = None
         conn = get_db_connection()
         try:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "SELECT id FROM riwayat WHERE user_id=%s AND tanggal_mulai=%s AND tanggal_selesai=%s AND mode_prediksi=%s",
-                    (user_id, tanggal_mulai_str, tanggal_selesai_str, mode)
+            with conn.cursor(buffered=True) as cursor:
+                with conn.cursor(buffered=True) as cursor:
+                    cursor.execute(
+                    """
+                    INSERT INTO riwayat
+                    (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal,
+                    mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung,
+                    asal_data, nama_file, activity, mape, created_at, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
+                    """,
+                    (
+                        user_id,
+                        tanggal_mulai_str,
+                        tanggal_selesai_str,
+                        n_periods,
+                        jumlah_ayam_awal,
+                        mode,
+                        json.dumps(data_prediksi),
+                        json.dumps(semua_data_aktual),
+                        total_pakan,      # pakai variabel yang sama seperti terminal
+                        total_karung,
+                        asal_data,
+                        nama_file,
+                        f"Prediksi {mode} dari {tanggal_mulai_str} sampai {tanggal_selesai_str}",
+                        0
+                    )
                 )
-                existing = cursor.fetchone()
-                if existing:
-                    riwayat_id = existing[0]
-                    cursor.execute(
-                        """
-                        UPDATE riwayat SET
-                            prediksi=%s,
-                            data_aktual=%s,
-                            total_pakan_kg=%s,
-                            total_karung=%s,
-                            mode_prediksi=%s,
-                            asal_data=%s,
-                            nama_file=%s,
-                            activity=%s,
-                            mape=%s,
-                            updated_at=NOW()
-                        WHERE id=%s
-                        """,
-                        (
-                            json.dumps(data_prediksi),
-                            json.dumps(semua_data_aktual),
-                            round(total_pakan,2),
-                            total_karung,
-                            mode,
-                            asal_data,
-                            nama_file,
-                            f"Prediksi {mode} dari {tanggal_mulai_str} sampai {tanggal_selesai_str}",
-                            0,
-                            riwayat_id
-                        )
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        INSERT INTO riwayat
-                        (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal,
-                         mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung,
-                         asal_data, nama_file, activity, mape, created_at, updated_at)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
-                        """,
-                        (
-                            user_id,
-                            tanggal_mulai_str,
-                            tanggal_selesai_str,
-                            n_periods,
-                            jumlah_ayam_awal,  # tetap None untuk per_periode
-                            mode,
-                            json.dumps(data_prediksi),
-                            json.dumps(semua_data_aktual),
-                            round(total_pakan,2),
-                            total_karung,
-                            asal_data,
-                            nama_file,
-                            f"Prediksi {mode} dari {tanggal_mulai_str} sampai {tanggal_selesai_str}",
-                            0
-                        )
-                    )
-                    riwayat_id = cursor.lastrowid
+                riwayat_id = cursor.lastrowid
+
                 conn.commit()
         finally:
             conn.close()
@@ -1526,9 +1671,9 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-#===========================
-# ENDPOINT PREDIKSI PER AYAM
-#===========================
+#========================
+# Mode Prediksi Per Ayam
+#========================
 @app.post("/predict_per_ayam")
 async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict = Depends(get_current_user)):
     try:
@@ -1547,8 +1692,8 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
         asal_data = getattr(data, "asal_data", "Default")
         nama_file = getattr(data, "nama_file", "Default")
 
-        # --- Load CSV ---
-        df = load_data(file_id=file_id)
+        # --- Load CSV user / default ---
+        df = load_data(file_id=file_id, user_id=user_id)
         if df.empty:
             return JSONResponse(status_code=400, content={"error": "Data CSV kosong"})
         df['tanggal'] = pd.to_datetime(df['tanggal'])
@@ -1585,7 +1730,7 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
         for i in range(hari):
             per_ayam = float(forecast[i]) if i < len(forecast) and not math.isnan(forecast[i]) else mean_per_ayam
             ayam_hidup = max(1, ayam_hidup - int(rata_mati))
-            pakan = float(round(per_ayam * ayam_hidup, 2))  # pastikan float Python
+            pakan = float(round(per_ayam * ayam_hidup, 2))
 
             # print(f"DEBUG hari {i+1}: per_ayam={per_ayam}, ayam_hidup={ayam_hidup}, pakan={pakan}")
 
@@ -1648,74 +1793,35 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
             total_kg_db = float(round(total_kg, 2))
             total_karung_db = float(round(total_karung, 2))
 
-            # print("DEBUG DB total_kg:", total_kg_db, type(total_kg))
-            # print("DEBUG DB total_karung:", total_karung_db, type(total_karung))
-
-            with conn.cursor() as cursor:
+            with conn.cursor(buffered=True) as cursor:
                 cursor.execute(
-                    "SELECT id FROM riwayat WHERE user_id=%s AND tanggal_mulai=%s AND tanggal_selesai=%s AND mode_prediksi=%s",
-                    (user_id, tanggal_mulai.strftime('%Y-%m-%d'), tanggal_selesai.strftime('%Y-%m-%d'), mode)
+                    """
+                    INSERT INTO riwayat
+                    (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal,
+                    mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung,
+                    asal_data, nama_file, activity, mape, created_at, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
+                    """,
+                    (
+                        user_id,
+                        tanggal_mulai.strftime('%Y-%m-%d'),
+                        tanggal_selesai.strftime('%Y-%m-%d'),
+                        hari,
+                        jumlah_ayam_awal,
+                        mode,
+                        json.dumps(hasil_prediksi),
+                        json.dumps(semua_data_aktual),
+                        total_kg,       # pakai total_kg dari terminal
+                        total_karung,
+                        asal_data,
+                        nama_file,
+                        f"Prediksi {mode} dari {tanggal_mulai.strftime('%Y-%m-%d')} sampai {tanggal_selesai.strftime('%Y-%m-%d')}",
+                        0
+                    )
                 )
-                existing = cursor.fetchone()
-                if existing:
-                    riwayat_id = existing[0]
-                    cursor.execute(
-                        """
-                        UPDATE riwayat SET
-                            prediksi=%s,
-                            data_aktual=%s,
-                            total_pakan_kg=%s,
-                            total_karung=%s,
-                            jumlah_ayam_awal=%s,
-                            mode_prediksi=%s,
-                            asal_data=%s,
-                            nama_file=%s,
-                            activity=%s,
-                            mape=%s,
-                            updated_at=NOW()
-                        WHERE id=%s
-                        """,
-                        (
-                            json.dumps(hasil_prediksi),
-                            json.dumps(semua_data_aktual),
-                            total_kg_db,          # <- pakai total_kg_db
-                            total_karung_db,      # <- pakai total_karung_db
-                            jumlah_ayam_awal,
-                            mode,
-                            asal_data,
-                            nama_file,
-                            f"Prediksi {mode} dari {tanggal_mulai.strftime('%Y-%m-%d')} sampai {tanggal_selesai.strftime('%Y-%m-%d')}",
-                            0,
-                            riwayat_id
-                        )
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        INSERT INTO riwayat
-                        (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal,
-                        mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung,
-                        asal_data, nama_file, activity, mape, created_at, updated_at)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
-                        """,
-                        (
-                            user_id,
-                            tanggal_mulai.strftime('%Y-%m-%d'),
-                            tanggal_selesai.strftime('%Y-%m-%d'),
-                            hari,
-                            jumlah_ayam_awal,
-                            mode,
-                            json.dumps(hasil_prediksi),
-                            json.dumps(semua_data_aktual),
-                            total_kg_db,         # <- pakai total_kg_db
-                            total_karung_db,     # <- pakai total_karung_db
-                            asal_data,
-                            nama_file,
-                            f"Prediksi {mode} dari {tanggal_mulai.strftime('%Y-%m-%d')} sampai {tanggal_selesai.strftime('%Y-%m-%d')}",
-                            0
-                        )
-                    )
-                    riwayat_id = cursor.lastrowid
+                riwayat_id = cursor.lastrowid
+
+
                 conn.commit()
         finally:
             conn.close()

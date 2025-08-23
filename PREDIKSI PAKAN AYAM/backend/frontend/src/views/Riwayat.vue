@@ -35,9 +35,11 @@
           <td class="text-center">{{ item.jumlah_ayam_awal ?? '-' }}</td>
           <td class="text-center">{{ formatAngka(item.total_pakan_kg) }}</td>
           <td class="text-center">{{ formatAngka(Math.round(item.total_karung)) }}</td>
-          <td class="text-center" :class="mapeClass(item.mape)">{{ formatPersen(item.mape) }}</td>
+          <td class="text-center" :class="mapeClass(item.mape)">
+            {{ item.mape != null ? formatPersen(item.mape) : '-' }}
+          </td>
           <td class="text-center">{{ formatAsalData(item.asal_data) }}</td>
-          <td class="text-center">{{ item.asal_data === 'upload' ? item.nama_file : 'Default' }}</td>
+          <td class="text-center">{{ item.asal_data === 'User Upload' ? item.nama_file : 'Default' }}</td>
           <td class="text-center">{{ formatTanggal(item.created_at) }}</td>
           <td>
             <div class="action-buttons">
@@ -92,7 +94,7 @@ async function loadRiwayat() {
         ...item,
         prediksi: prediksiArray,
         data_aktual: aktualArray,
-        mape: Number(item.mape) || 0,
+        mape: item.mape != null ? Number(item.mape) : null,
         total_karung: totalKarung,
         total_pakan_kg: totalPakanKg
       }
@@ -114,7 +116,7 @@ function formatTanggal(value) {
 function formatAngka(value) { return value == null ? '-' : value.toLocaleString('id-ID') }
 function formatPersen(value) { return value == null ? '-' : value.toFixed(2) + '%' }
 function mapeClass(mape) { return mape < 10 ? 'mape-baik' : mape < 20 ? 'mape-cukup' : 'mape-buruk' }
-function formatAsalData(value) { return value === 'upload' ? 'Upload' : 'Default' }
+function formatAsalData(value) { return value === 'User Upload' ? 'Upload' : 'Default' }
 
 async function hapusItem(id) {
   if (!confirm('Yakin ingin menghapus data ini?')) return;
@@ -133,9 +135,9 @@ async function hapusSemua() {
 
 <style scoped>
 .container {
-  max-width: 1400px; 
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 20px 40px; 
+  padding: 20px 40px;
   text-align: center;
 }
 

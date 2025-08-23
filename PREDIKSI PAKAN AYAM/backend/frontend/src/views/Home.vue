@@ -19,7 +19,7 @@
         </p>
         <ul>
           <li>✔️ Efisiensi Pakan</li>
-          <li>✔️ Prediksi Akurat</li>
+          <li>✔️ Prediksi Terpecaya</li>
           <li>✔️ Data Harian Otomatis</li>
         </ul>
       </div>

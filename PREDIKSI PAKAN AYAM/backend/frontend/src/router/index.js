@@ -8,10 +8,12 @@ const Riwayat = () => import('../views/Riwayat.vue')
 const DataPakan = () => import('../views/DataPakan.vue')
 const Register = () => import('../views/Register.vue')
 const Login = () => import('../views/Login.vue')
+const ForgotPassword = () => import('../views/ForgotPassword.vue') 
 const AdminDashboard = () => import('../views/AdminDashboard.vue')
 const UserDashboard = () => import('../views/UserDashboard.vue')
 const KelolaUser = () => import('../views/KelolaUser.vue')
 const AdminRiwayat = () => import('../views/AdminRiwayat.vue')
+const AdminDataPakan = () => import('../views/AdminDataPakan.vue')
 
 // ===== Routes =====
 const routes = [
@@ -19,6 +21,8 @@ const routes = [
   { path: '/home', name: 'Home', component: Home },
   { path: '/register', name: 'Register', component: Register },
   { path: '/login', name: 'Login', component: Login },
+  { path: '/forgot', name: 'ForgotPassword', component: ForgotPassword }, 
+
 
   // ===== User Routes =====
   { path: '/prediksi', name: 'Prediksi', component: Prediksi, meta: { requiresAuth: true, role: 'user' } },
@@ -29,6 +33,7 @@ const routes = [
   // ===== Admin Routes =====
   { path: '/admin/dashboard', name: 'AdminDashboard', component: AdminDashboard, meta: { requiresAuth: true, role: 'admin' } },
   { path: '/admin/users', name: 'KelolaUser', component: KelolaUser, meta: { requiresAuth: true, role: 'admin' } },
+  { path: '/admin/data-pakan', name: 'AdminDataPakan', component: AdminDataPakan, meta: { requiresAuth: true, role: 'admin' } },
   { path: '/admin/prediksi/:id', name: 'AdminPrediksiDetail', component: Prediksi, meta: { requiresAuth: true, role: 'admin' } },
   { path: '/admin/riwayat', name: 'AdminRiwayat', component: AdminRiwayat, meta: { requiresAuth: true, role: 'admin' } },
 
@@ -47,13 +52,11 @@ router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
   const role = localStorage.getItem('role')
 
-  // 🔓 Public routes (selalu bisa diakses tanpa login)
-  const publicPaths = ['/home', '/login', '/register']
-  if (publicPaths.includes(to.path)) {
-    return next()
-  }
+  // 🔓 Public routes
+  const publicPaths = ['/home', '/login', '/register', '/forgot']
+  if (publicPaths.includes(to.path)) return next()
 
-  // 🔑 Kalau ada token → cek expired
+  // 🔑 Cek token dan expired
   if (token) {
     try {
       const decoded = jwtDecode(token)
@@ -69,11 +72,9 @@ router.beforeEach((to, from, next) => {
   }
 
   // 🚫 Kalau butuh auth tapi belum login
-  if (to.meta.requiresAuth && !token) {
-    return next('/login')
-  }
+  if (to.meta.requiresAuth && !token) return next('/login')
 
-  // 🚦 Kalau role tidak sesuai
+  // 🚦 Role check
   if (to.meta.role && role !== to.meta.role) {
     if (role === 'admin') return next('/admin/dashboard')
     if (role === 'user') return next('/user/dashboard')
