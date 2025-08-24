@@ -12,12 +12,12 @@ import traceback
 from typing import List
 from sqlalchemy.orm import Session
 import uuid
+import pandas as pd
 import warnings
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import jwt
 import numpy as np
-import pandas as pd
 from pmdarima import auto_arima
 from statsmodels.tools.sm_exceptions import ValueWarning
 from xhtml2pdf import pisa
@@ -497,7 +497,6 @@ def get_db_connection():
 async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_user)):
     conn = cursor = None
     try:
-        # --- Validasi user ---
         current_user_id = current_user.get("user_id")
         if not current_user_id:
             raise HTTPException(status_code=401, detail="User tidak valid")
@@ -506,11 +505,18 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
         prediksi_list = data.get("prediksi", [])
         aktual_list = data.get("data_aktual", [])
         mode_prediksi = data.get("mode_prediksi", "per_ayam")
-        asal_data = data.get("asal_data") or "Default"
-        nama_file = data.get("nama_file") or "Default"
-
-        # --- Hitung jumlah ayam awal ---
         jumlah_ayam_awal_input = int(data.get("jumlah_ayam_awal") or 0)
+
+        file_id = data.get("file_id") or "default"
+        df, meta = load_data(file_id=file_id, user_id=current_user_id)
+        print("DEBUG jumlah baris CSV:", len(df))
+        nama_file = meta["nama_file"]
+        asal_data = meta["asal_data"]
+        
+        print("DEBUG /riwayat - file_id:", file_id, "nama_file:", nama_file, "asal_data:", asal_data)
+
+
+        # --- Jumlah ayam awal hanya dipakai per_ayam ---
         if mode_prediksi == "per_ayam" and jumlah_ayam_awal_input <= 0:
             jumlah_ayam_awal_input = max(
                 [int(p.get("ayam_hidup", 0)) for p in prediksi_list if isinstance(p, dict)],
@@ -532,12 +538,14 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
                     per_ayam = float(p.get("per_ayam", 0))
                     ayam_hidup = int(p.get("ayam_hidup", jumlah_ayam_awal_input))
                     kg = per_ayam * ayam_hidup
+                    y = kg
                 else:
                     per_ayam = None
                     ayam_hidup = None
                     kg = round(float(p.get("kg") or p.get("y") or 0), 2)
                     y = round(float(p.get("y") or kg), 2)
-                if kg <= 0: continue
+                if kg <= 0:
+                    continue
                 x = p.get("x") or p.get("date") or "-"
                 periode = p.get("periode")
             else:
@@ -545,25 +553,25 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
                     per_ayam = float(p)
                     ayam_hidup = jumlah_ayam_awal_input
                     kg = per_ayam * ayam_hidup
+                    y = kg
                 else:
                     per_ayam = None
                     ayam_hidup = None
                     kg = float(p if p is not None else 0.0)
-                if kg <= 0: continue
+                    y = kg
+                if kg <= 0:
+                    continue
                 x = "-"
                 periode = None
 
             standar_prediksi.append({
                 "x": x,
-                "y": kg if mode_prediksi == "per_ayam" else y,
+                "y": y,
                 "kg": kg,
                 "ayam_hidup": ayam_hidup,
                 "per_ayam": per_ayam,
                 "periode": periode
             })
-
-        if not standar_prediksi:
-            raise HTTPException(status_code=400, detail="Prediksi kosong")
 
         # --- Standarisasi data aktual ---
         standar_aktual = []
@@ -571,58 +579,67 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
             if isinstance(a, dict):
                 raw_kg = a.get("kg") or a.get("y") or a.get("stok") or 0
                 kg = round(float(raw_kg), 2)
-                if kg <= 0: continue
+                if kg <= 0:
+                    continue
                 x = a.get("x") or a.get("date") or "-"
+                y = round(float(a.get("y") or kg), 2)
                 periode = a.get("periode")
             else:
                 kg = float(a if a is not None else 0.0)
-                if kg <= 0: continue
+                if kg <= 0:
+                    continue
                 x = "-"
+                y = kg
                 periode = None
 
             standar_aktual.append({
                 "x": x,
-                "y": round(float(a.get("y") or kg), 2) if isinstance(a, dict) else kg,
+                "y": y,
                 "kg": kg,
                 "periode": periode
             })
+
+        if not standar_prediksi:
+            raise HTTPException(status_code=400, detail="Prediksi kosong")
 
         # --- Hitung total pakan & karung ---
         total_pakan = round(sum([p["kg"] for p in standar_prediksi]), 2)
         total_karung = math.ceil(total_pakan / 50)
         jumlah_ayam_awal_db = jumlah_ayam_awal_input if mode_prediksi == "per_ayam" else None
-        activity = data.get("activity") or f"Prediksi {mode_prediksi} dari {tanggal_mulai.date()} sampai {tanggal_selesai.date()}"
-        mape = data.get("mape") or None
 
-        # --- Simpan ke DB ---
+        # --- Simpan ke DB (Insert baru setiap klik) ---
         conn = get_db_connection()
         cursor = conn.cursor(buffered=True)
 
-        # --- Cek duplikat ---
+        # --- Cek duplikat sebelum insert ---
         cursor.execute("""
             SELECT id FROM riwayat 
             WHERE user_id=%s AND tanggal_mulai=%s AND tanggal_selesai=%s
-            AND mode_prediksi=%s AND nama_file=%s
+            AND mode_prediksi=%s AND nama_file=%s AND asal_data=%s
         """, (
             current_user_id,
             tanggal_mulai.strftime("%Y-%m-%d"),
             tanggal_selesai.strftime("%Y-%m-%d"),
             mode_prediksi,
-            nama_file
+            nama_file,
+            asal_data
         ))
         existing = cursor.fetchone()
         if existing:
             return {"message": "Riwayat sudah ada, tidak disimpan lagi", "riwayat_id": existing[0]}
 
-        # --- Insert baru ---
-        try:
-            cursor.execute("""
-                INSERT INTO riwayat
-                (user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, data_aktual,
-                total_pakan_kg, total_karung, mode_prediksi, jumlah_ayam_awal, activity,
-                mape, asal_data, nama_file, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-            """, (
+        activity = data.get("activity") or f"Prediksi {mode_prediksi} dari {tanggal_mulai.date()} sampai {tanggal_selesai.date()}"
+        mape = data.get("mape") or None
+
+        cursor.execute(
+            """
+            INSERT INTO riwayat
+            (user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, data_aktual,
+            total_pakan_kg, total_karung, mode_prediksi, jumlah_ayam_awal, activity,
+            mape, asal_data, nama_file, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            """,
+            (
                 current_user_id,
                 tanggal_mulai.strftime("%Y-%m-%d"),
                 tanggal_selesai.strftime("%Y-%m-%d"),
@@ -637,20 +654,23 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
                 mape,
                 asal_data,
                 nama_file
-            ))
-            conn.commit()
-            riwayat_id = cursor.lastrowid
-            print(f"✅ Riwayat ID {riwayat_id} berhasil disimpan!")
-            return {"message": "Riwayat berhasil disimpan", "riwayat_id": riwayat_id}
-        except Exception as e:
+            )
+        )
+        conn.commit()
+        riwayat_id = cursor.lastrowid
+        return {"message": "Riwayat berhasil disimpan", "riwayat_id": riwayat_id}
+
+    except Exception as e:
+        if conn:
             conn.rollback()
-            raise HTTPException(status_code=500, detail=f"Error menyimpan riwayat: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error menyimpan riwayat: {str(e)}")
 
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+
 
 
 
@@ -983,22 +1003,21 @@ class DataPakan(BaseModel):
 data_pakan_list: List[dict] = []
 
 CSV_PATH = "data/data_pakan_ayam.csv"
-DATA_DIR = "data/uploaded_csv"
-META_FILE = "metadata.json"
-
-file_storage = []
-
-if os.path.exists(META_FILE):
-    with open(META_FILE, "r") as f:
-        file_storage = json.load(f)
-
-# ----------------------------
-# Fungsi save_metadata ditambahkan di sini
-# ----------------------------
-def save_metadata():
-    os.makedirs(DATA_DIR, exist_ok=True)  # pastikan folder ada
-    with open(META_FILE, "w", encoding="utf-8") as f:
-        json.dump(file_storage, f, ensure_ascii=False, indent=2)
+DATA_DIR = "uploads/csv"
+        
+def save_to_csv(data: DataPakan):
+    os.makedirs("data", exist_ok=True)  # pastikan folder ada
+    file_exists = os.path.isfile(CSV_PATH)
+    
+    with open(CSV_PATH, "a", newline="", encoding="utf-8") as csvfile:
+        writer = csv.writer(csvfile)
+        
+        # tulis header kalau file baru
+        if not file_exists:
+            writer.writerow(["tanggal_mulai", "tanggal_selesai", "jumlah_ayam_awal", "file_id"])
+        
+        # tulis baris data
+        writer.writerow([data.tanggal_mulai, data.tanggal_selesai, data.jumlah_ayam_awal, data.file_id])
 
 
 def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_prediksi):
@@ -1046,19 +1065,34 @@ def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_predi
 #=================
 # FUNGSI LOAD DATA
 #=================
+# ------------------- load_data.py -------------------
 def load_data(file_id=None, user_id=None):
     print("load_data dipanggil dengan file_id:", file_id, "user_id:", user_id)
 
-    if not file_id or file_id == "default":
-        file_path = CSV_PATH  # pakai data default
-    else:
-        file_path = os.path.join("data", "uploaded_csv", str(user_id), f"{file_id}.csv")
-        if not os.path.exists(file_path):
-            print(f"File '{file_path}' tidak ditemukan, pakai CSV default")
-            file_path = CSV_PATH
 
-    df_raw = pd.read_csv(file_path)
-    df = df_raw.copy()
+    file_path = CSV_PATH
+    nama_file = "Default"
+    asal_data = "Default"
+
+    # --- Ambil file upload user jika ada ---
+    if file_id and file_id != "default":
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT file_name, file_path FROM data_pakan WHERE id=%s AND user_id=%s",
+                       (file_id, user_id))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if row and row["file_path"] and os.path.exists(row["file_path"]):
+            file_path = row["file_path"].replace("\\", "/")
+            nama_file = row["file_name"]
+            asal_data = "User Upload" if file_id != "default" else "Default"
+            
+    print(f"load_data: pakai file '{nama_file}' dari '{asal_data}' → path: {file_path}")
+
+    # --- Load CSV ---
+    df = pd.read_csv(file_path)
     df.rename(columns=lambda x: x.strip().lower(), inplace=True)
 
     # --- Ganti nama bulan Indonesia ke English ---
@@ -1072,21 +1106,26 @@ def load_data(file_id=None, user_id=None):
     for ind, eng in ind_to_eng_month.items():
         df['tanggal'] = df['tanggal'].str.replace(ind, eng, regex=False)
 
+    # --- Konversi tanggal ---
     df['tanggal'] = pd.to_datetime(df['tanggal'], format='%d %B %Y', errors='coerce')
 
-    for col in ['pakan_pakai', 'jumlah_ayam', 'jumlah_ayam_mati']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+    # --- Konversi angka (replace koma → titik) ---
+    for col in ['pakan_pakai','jumlah_ayam','jumlah_ayam_mati']:
+        df[col] = df[col].astype(str).str.replace(',', '.').astype(float)
 
-    df = df[df['pakan_pakai'] > 0]
-    df.dropna(subset=['tanggal', 'pakan_pakai', 'jumlah_ayam', 'jumlah_ayam_mati'], inplace=True)
+    print("DEBUG baris sebelum filter:", len(df))
+
+    # --- Filter hanya baris valid ---
+    df.dropna(subset=['tanggal','pakan_pakai','jumlah_ayam','jumlah_ayam_mati'], inplace=True)
+    df = df[(df['pakan_pakai'] > 0) & (df['jumlah_ayam'] > 0)]
+
+    print("DEBUG baris setelah filter:", len(df))
+
     df.sort_values('tanggal', inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    if 'periode' in df.columns:
-        df['periode'] = df['periode'].replace(["", "nan", "NaN", "None"], np.nan)
+    return df, {"nama_file": nama_file, "asal_data": asal_data}
 
-    print(f"load_data: {len(df)} baris valid dari {file_path}")
-    return df
 
 
 def get_periode_boundaries(df):
@@ -1248,71 +1287,91 @@ def get_db_connection():
 # ========================
 # UPLOAD CSV LANGSUNG (Frontend → DB)
 # ========================
+# ------------------- upload_csv.py -------------------
 @app.post("/data_pakan/upload")
-async def upload_csv(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+async def upload_csv(
+    file: UploadFile = File(...), 
+    current_user: dict = Depends(get_current_user)
+):
+    import pandas as pd
+    import os
+
+    # --- Cek ekstensi file ---
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Hanya file CSV yang diperbolehkan")
 
-    # Baca CSV
+    # --- Load CSV ---
     try:
         df = pd.read_csv(file.file)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Gagal membaca CSV: {e}")
 
-    # Validasi kolom wajib
+    # --- Kolom wajib dengan alias ---
     required_columns_alias = {
-        "tanggal": ["tanggal", "date"],
-        "jumlah_ayam_awal": ["jumlah_ayam_awal", "jumlah_ayam", "jml_ayam"],
-        "Pakan_Pakai": ["pakan_kg", "pakan", "pakankg", "pakanKg", "pakan_", "PakanKG", "pakan_Pakai", "Pakan_Pakai", "PakanPakai"],
-        "jumlah_ayam_mati": ["jumlah_ayam_mati", "ayam_mati", "mati", "ayam_mati"]
+        "tanggal": ["tanggal", "tgl", "date"],
+        "jumlah_ayam": ["jumlah_ayam_awal", "jumlah_ayam", "jml_ayam"],
+        "pakan_pakai": ["pakan_kg", "pakan", "pakankg", "pakan_", "pakan_pakai", "Pakan_Pakai", "PakanPakai"],
+        "jumlah_ayam_mati": ["jumlah_ayam_mati", "ayam_mati", "mati"]
     }
 
+    # --- Mapping kolom ---
     column_map = {}
     for key, aliases in required_columns_alias.items():
         match = next((c for c in df.columns if c.lower() in [a.lower() for a in aliases]), None)
         if match:
             column_map[key] = match
         else:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Kolom wajib hilang: '{key}' (cari salah satu dari: {', '.join(aliases)})"
-            )
+            raise HTTPException(status_code=400, detail=f"Kolom wajib hilang: {key}")
 
-    # Validasi jumlah baris minimal
+    # --- Rename ke standar ---
+    df.rename(columns={
+        column_map["tanggal"]: "tanggal",
+        column_map["jumlah_ayam"]: "jumlah_ayam",
+        column_map["pakan_pakai"]: "pakan_pakai",
+        column_map["jumlah_ayam_mati"]: "jumlah_ayam_mati"
+    }, inplace=True)
+
+    # --- Validasi jumlah baris minimal ---
     if len(df) < 30:
-        raise HTTPException(status_code=400, detail=f"Jumlah baris minimal 30, tapi file hanya ada {len(df)} baris")
+        raise HTTPException(status_code=400, detail=f"Minimal 30 baris, tapi file hanya {len(df)} baris")
 
-    # Validasi tipe data
-    for idx, row in df.iterrows():
+    # --- Konversi dan validasi isi kolom ---
+    for col in ["pakan_pakai", "jumlah_ayam", "jumlah_ayam_mati"]:
         try:
-            pd.to_datetime(row[column_map["tanggal"]])
-        except:
-            raise HTTPException(status_code=400, detail=f"Baris {idx+1}: kolom 'tanggal' harus format tanggal valid")
-        for col in ["jumlah_ayam_awal", "Pakan_Pakai", "jumlah_ayam_mati"]:
-            try:
-                float(row[column_map[col]])
-            except:
-                raise HTTPException(status_code=400, detail=f"Baris {idx+1}: kolom '{col}' harus angka")
+            df[col] = df[col].astype(str).str.replace(",", ".").astype(float)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Kolom {col} ada nilai tidak valid: {e}")
 
-    # Simpan file
+    # --- Cek nilai positif ---
+    if (df["pakan_pakai"] <= 0).any() or (df["jumlah_ayam"] <= 0).any() or (df["jumlah_ayam_mati"] < 0).any():
+        raise HTTPException(
+            status_code=400, 
+            detail="Semua nilai pakan, jumlah ayam, dan ayam mati harus valid (>0 atau >=0)"
+        )
+
+    # --- Simpan file fisik ---
     safe_filename = _secure_filename(file.filename)
-    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    user_dir = os.path.join(UPLOAD_DIR, str(current_user["user_id"]))
+    os.makedirs(user_dir, exist_ok=True)
+    file_path = os.path.join(user_dir, safe_filename)
     df.to_csv(file_path, index=False)
 
-    # Simpan info ke database (termasuk file_path!)
+    # --- Simpan info ke DB ---
     conn = get_db_connection()
     cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO data_pakan (user_id, file_name, file_path, upload_date) VALUES (%s, %s, %s, NOW())",
-            (current_user["user_id"], safe_filename, file_path)
-        )
-        conn.commit()
-    finally:
-        cursor.close()
-        conn.close()
+    cursor.execute(
+        "INSERT INTO data_pakan (user_id, file_name, file_path, upload_date) VALUES (%s,%s,%s,NOW())",
+        (current_user["user_id"], safe_filename, file_path)
+    )
+    conn.commit()
+    file_id = cursor.lastrowid
+    cursor.close()
+    conn.close()
 
-    return {"message": "CSV berhasil diupload", "file_name": safe_filename}
+    return {"message": "CSV berhasil diupload", "file_id": file_id, "file_name": safe_filename}
+
+
+
 
 # ========================
 # GET ALL DATA PAKAN
@@ -1514,20 +1573,13 @@ async def download_template_excel():
     
 # ===== Endpoint predict_periode ===== 
 def get_file_name(file_id, user_id):
-    # cek file di folder uploads user
     file_path = f"static/uploads/{user_id}/{file_id}.csv"
     if os.path.exists(file_path):
-        return os.path.basename(file_path)  # ambil nama file.csv
+        return os.path.basename(file_path)  
     return "Default"
 
 @app.post("/predict_periode")
 async def predict_periode(request: Request, current_user: dict = Depends(get_current_user)):
-    import traceback, math, json
-    from datetime import datetime, timedelta
-    import pandas as pd
-    import numpy as np
-    from fastapi.responses import JSONResponse
-
     try:
         user_id = current_user.get("user_id")
         if not user_id:
@@ -1538,7 +1590,10 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         tanggal_selesai_str = body.get("tanggal_selesai")
         file_id = body.get("file_id")
         asal_data = "User Upload" if file_id != "default" else "Default"
-        nama_file = get_file_name(file_id, user_id)
+        # nama_file = get_file_name(file_id, user_id)
+        df, meta = load_data(file_id=file_id, user_id=user_id)
+        nama_file = meta["nama_file"]
+        asal_data = meta["asal_data"]
         mode = "per_periode"
 
         if not tanggal_mulai_str or not tanggal_selesai_str:
@@ -1549,14 +1604,38 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         n_periods = (tanggal_selesai - tanggal_mulai).days + 1
 
         # --- Load CSV user / default ---
-        df = load_data(file_id=file_id, user_id=user_id)
+        df, meta = load_data(file_id, user_id)
         if df.empty:
-            return JSONResponse(status_code=400, content={"error": "Data CSV kosong"})
+            return JSONResponse(status_code=400, content={"error": "Data CSV kosong Karna Baris data Tidak Memenuhi Syarat "})
+        # --- Rename kolom dari CSV upload supaya sesuai dengan load_data ---
+        rename_map = {}
+        if 'jumlah_ayam_awal' in df.columns:
+            rename_map['jumlah_ayam_awal'] = 'jumlah_ayam'
+        if 'Pakan_Pakai' in df.columns:
+            rename_map['Pakan_Pakai'] = 'pakan_pakai'
+        # kalau mau bisa juga untuk 'Jumlah_Ayam_Mati'
+        if 'Jumlah_Ayam_Mati' in df.columns:
+            rename_map['Jumlah_Ayam_Mati'] = 'jumlah_ayam_mati'
+
+        if rename_map:
+            df.rename(columns=rename_map, inplace=True)
+            
         df['tanggal'] = pd.to_datetime(df['tanggal'])
         df = df.set_index('tanggal').sort_index()
         df_train = df[df.index < tanggal_mulai].copy()
+        print(f"DEBUG baris sebelum filter: {len(df)}")
+        print(f"DEBUG baris setelah filter: {len(df_train)}")
+
         if df_train.empty or len(df_train["pakan_pakai"]) < 10:
-            return JSONResponse(status_code=400, content={"error": "Data tidak cukup untuk pelatihan model."})
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Data tidak cukup untuk pelatihan model.",
+                    "detail": f"Data setelah filter tanggal mulai {tanggal_mulai.strftime('%Y-%m-%d')} kosong. Total baris awal: {len(df)}, setelah filter: {len(df_train)}"
+                }
+            )
+
+
 
         # --- Train ARIMA ---
         try:
@@ -1585,13 +1664,22 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         # --- Data aktual ---
         semua_data_aktual = []
         for idx, row in df.iterrows():
-            pakan_kg = round(float(row['pakan_pakai']), 2) if 'pakan_pakai' in row else 0.0
+            pakan_aktual = float(round(float(row.get('pakan_pakai', 0)), 2))
             semua_data_aktual.append({
                 "x": idx.strftime("%Y-%m-%d"),
-                "kg": pakan_kg,
-                "y": pakan_kg,
-                "periode": int(row['periode']) if 'periode' in row and pd.notna(row['periode']) else None
+                "y": pakan_aktual,
+                "kg": pakan_aktual
             })
+
+        # hitung total setelah loop selesai
+        total_aktual = sum(item["kg"] for item in semua_data_aktual)
+        total_karung_aktual = math.ceil(total_aktual / 50)
+
+        print("=== HASIL TOTAL AKTUAL ===")
+        print(f"Total Aktual (kg): {total_aktual}")
+        print(f"Total Aktual (karung): {total_karung_aktual}")
+        print("===========================")
+
 
         catatan = (
             "Mode prediksi per periode tidak menggunakan input jumlah ayam.\n"
@@ -1654,7 +1742,9 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         summary = {
             "total_prediksi_kg": round(total_pakan,2),
             "total_prediksi_karung": total_karung,
-            "jumlah_ayam_awal": None,  # tampil "-" di frontend
+            "total_aktual_kg": round(total_aktual,2),
+            "total_aktual_karung": total_karung_aktual,
+            "jumlah_ayam_awal": None,  
             "durasi_hari": n_periods,
             "konsumsi_harian_per_ekor": None,
             "catatan": catatan
@@ -1681,6 +1771,20 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
         user_id = current_user.get("user_id")
         if not user_id:
             raise HTTPException(status_code=401, detail="User tidak valid")
+        
+        body = await request.json()
+        tanggal_mulai_str = body.get("tanggal_mulai")
+        tanggal_selesai_str = body.get("tanggal_selesai")
+        file_id = body.get("file_id")
+        asal_data = "User Upload" if file_id != "default" else "Default"
+        # nama_file = get_file_name(file_id, user_id)
+        df, meta = load_data(file_id=file_id, user_id=user_id)
+        nama_file = meta["nama_file"]
+        asal_data = meta["asal_data"]
+        mode = "per_periode"
+
+        if not tanggal_mulai_str or not tanggal_selesai_str:
+            return JSONResponse(status_code=400, content={"error": "Tanggal mulai dan selesai wajib diisi"})
 
         # --- Tanggal & hari ---
         tanggal_mulai = datetime.strptime(data.tanggal_mulai, "%Y-%m-%d")
@@ -1689,20 +1793,29 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
         jumlah_ayam_awal = max(int(data.jumlah_ayam_awal or 1), 1)
         file_id = getattr(data, "file_id", None)
         mode = "per_ayam"
-        asal_data = getattr(data, "asal_data", "Default")
-        nama_file = getattr(data, "nama_file", "Default")
 
         # --- Load CSV user / default ---
-        df = load_data(file_id=file_id, user_id=user_id)
+        df, meta = load_data(file_id, user_id)
         if df.empty:
-            return JSONResponse(status_code=400, content={"error": "Data CSV kosong"})
+            return JSONResponse(status_code=400, content={"error": "Data CSV kosong Karna Baris data Tidak Memenuhi Syarat "})
         df['tanggal'] = pd.to_datetime(df['tanggal'])
         df = df.set_index('tanggal').sort_index()
 
         # --- Data training ---
         df_train = df[df.index < tanggal_mulai].copy()
+        print(f"DEBUG baris sebelum filter: {len(df)}")
+        print(f"DEBUG baris setelah filter: {len(df_train)}")
+
         if df_train.empty or len(df_train["pakan_pakai"]) < 10:
-            return JSONResponse(status_code=400, content={"error": "Data tidak cukup untuk pelatihan model."})
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Data tidak cukup untuk pelatihan model.",
+                    "detail": f"Data setelah filter tanggal mulai {tanggal_mulai.strftime('%Y-%m-%d')} kosong. Total baris awal: {len(df)}, setelah filter: {len(df_train)}"
+                }
+            )
+
+
 
         # --- Per ayam series ---
         per_ayam_series = df_train["pakan_pakai"] / df_train["jumlah_ayam"].replace(0, 1)
@@ -1748,7 +1861,7 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
         total_karung = float(math.ceil(total_kg / 50))
         # print("DEBUG total_kg =", total_kg, "total_karung =", total_karung)
 
-        # --- Data aktual ---
+     # --- Data aktual ---
         semua_data_aktual = []
         for idx, row in df.iterrows():
             pakan_aktual = float(round(float(row.get('pakan_pakai', 0)), 2))
@@ -1757,6 +1870,16 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
                 "y": pakan_aktual,
                 "kg": pakan_aktual
             })
+
+        # hitung total setelah loop selesai
+        total_aktual = sum(item["kg"] for item in semua_data_aktual)
+        total_karung_aktual = math.ceil(total_aktual / 50)
+
+        print("=== HASIL TOTAL AKTUAL ===")
+        print(f"Total Aktual (kg): {total_aktual}")
+        print(f"Total Aktual (karung): {total_karung_aktual}")
+        print("===========================")
+
 
         # --- Konsumsi harian per ekor ---
         konsumsi_harian_per_ekor = total_kg / (jumlah_ayam_awal * hari) if jumlah_ayam_awal > 0 else 0
@@ -1768,7 +1891,7 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
             "Periksa prediksi harian untuk mencegah kekurangan pakan."
         )
 
-        # --- Print debug terminal lengkap ---
+        # --- Print debug terminal ---
         print("==================== PREDIKSI PER AYAM ====================")
         print(f"User ID: {user_id}")
         print(f"Tanggal mulai: {tanggal_mulai.strftime('%Y-%m-%d')}")
@@ -1830,6 +1953,8 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
         summary = {
             "total_prediksi_kg": total_kg,
             "total_prediksi_karung": total_karung,
+            "total_aktual_kg": round(total_aktual,2),
+            "total_aktual_karung": total_karung_aktual,
             "jumlah_ayam_awal": jumlah_ayam_awal,
             "durasi_hari": hari,
             "konsumsi_harian_per_ekor": round(konsumsi_harian_per_ekor, 2),

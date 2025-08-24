@@ -14,7 +14,7 @@
           <th>Mode Prediksi</th>
           <th>Jumlah Ayam Awal</th>
           <th>Total Pakan (kg)</th>
-          <th>Total Karung</th>
+          <th>Total Karung (50kg)</th>
           <th>MAPE</th>
           <th>Asal Data</th>
           <th>Nama File</th>
@@ -69,7 +69,12 @@ onMounted(() => {
 async function loadRiwayat() {
   try {
     const token = localStorage.getItem('token')
-    if (!token) { window.location.href = '/login'; return }
+    // if (!token) { window.location.href = '/login'; return }
+    if (!token) {
+    riwayat.value = [] // kosongkan tapi tetap di halaman
+    return
+  }
+    
 
     const res = await axios.get('http://127.0.0.1:8000/riwayat', {
       headers: { Authorization: `Bearer ${token.trim()}` }
@@ -102,7 +107,11 @@ async function loadRiwayat() {
 
   } catch (error) {
     console.error('Gagal mengambil data:', error.response?.data || error)
-    if (error.response?.status === 401) { window.location.href = '/login' }
+    // if (error.response?.status === 401) { window.location.href = '/login' }
+     if (error.response?.status === 401) {
+      // user belum login, kosongkan tapi tetap di halaman
+      riwayat.value = []
+     }
   }
 }
 

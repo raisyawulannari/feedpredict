@@ -213,6 +213,15 @@ export default {
       return "red";
     },
   },
+
+  watch: {
+    file_id(newVal) {
+      const selectedFile = this.files.find(f => f.id.toString() === newVal);
+      this.asal_data = newVal !== "default" ? "User Upload" : "Default";
+      this.nama_file = newVal !== "default" ? selectedFile?.fileName || "Unknown.csv" : "Default";
+    }
+  },
+
   async mounted() {
     const token = localStorage.getItem("token");
     if (!token) {
@@ -319,99 +328,113 @@ export default {
     },
 
     async getPrediksi(simpan = true) {
-      if (!this.tanggal_mulai || !this.tanggal_selesai) {
-        return Swal.fire("Tanggal belum lengkap", "Mohon isi tanggal mulai dan selesai", "warning");
-      }
+  // --- Validasi input ---
+  if (!this.tanggal_mulai || !this.tanggal_selesai) {
+    return Swal.fire("Tanggal belum lengkap", "Mohon isi tanggal mulai dan selesai", "warning");
+  }
 
-      if (this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
-        return Swal.fire("Jumlah ayam wajib diisi", "Minimal 1 ayam", "warning");
-      }
+  if (this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
+    return Swal.fire("Jumlah ayam wajib diisi", "Minimal 1 ayam", "warning");
+  }
 
-      if (new Date(this.tanggal_selesai) < new Date(this.tanggal_mulai)) {
-        return Swal.fire("Tanggal salah", "Tanggal selesai tidak boleh sebelum tanggal mulai", "warning");
-      }
+  if (new Date(this.tanggal_selesai) < new Date(this.tanggal_mulai)) {
+    return Swal.fire("Tanggal salah", "Tanggal selesai tidak boleh sebelum tanggal mulai", "warning");
+  }
 
-      this.isLoading = true;
+  this.isLoading = true;
 
-      try {
-        const endpoint = this.mode === "per_ayam" ? "/predict_per_ayam" : "/predict_periode";
+  try {
+    // --- Tentukan endpoint ---
+    const endpoint = this.mode === "per_ayam" ? "/predict_per_ayam" : "/predict_periode";
 
-        const payload = {
-          tanggal_mulai: this.tanggal_mulai,
-          tanggal_selesai: this.tanggal_selesai,
-          file_id: this.file_id || "default",
-        };
-        if (this.mode === "per_ayam") payload.jumlah_ayam_awal = this.jumlah_ayam_awal || 1;
+    // --- Payload ---
+    const payload = {
+      tanggal_mulai: this.tanggal_mulai,
+      tanggal_selesai: this.tanggal_selesai,
+      file_id: this.file_id || "default",
+    };
+    if (this.mode === "per_ayam") payload.jumlah_ayam_awal = this.jumlah_ayam_awal || 1;
 
-        const res = await api.post(endpoint, payload);
+    console.log("▶️ Kirim ke endpoint:", endpoint, payload);
 
-        const prediksi = res.data.data_prediksi || [];
-        const aktual = res.data.data_aktual || [];
-        const apiSummary = res.data.summary || {};
+    // --- Panggil API ---
+    const res = await api.post(endpoint, payload);
+    console.log("✅ Respon API:", res.data);
 
-        // --- Mapping data untuk grafik ---
-        const semuaTanggal = Array.from(
-          new Set([...aktual.map(a => a.x.split("T")[0]), ...prediksi.map(p => p.x.split("T")[0])])
-        ).sort();
+    // --- Ambil data prediksi & aktual ---
+    const prediksi = res.data.data_prediksi || [];
+    const aktual = res.data.data_aktual || [];
+    const apiSummary = res.data.summary || {};
 
-        const actualMap = Object.fromEntries(
-          aktual.map(a => [a.x.split("T")[0], a.kg ?? a.y ?? 0])
-        );
+    // --- Semua tanggal unik ---
+    const semuaTanggal = Array.from(
+      new Set([...aktual.map(a => a.x.split("T")[0]), ...prediksi.map(p => p.x.split("T")[0])])
+    ).sort();
 
-        const predictedMap = Object.fromEntries(
-          prediksi.map(p => [p.x.split("T")[0], p.y ?? 0])
-        );
+    // --- Mapping data untuk chart ---
+    const actualMap = Object.fromEntries(
+      aktual.map(a => [a.x.split("T")[0], a.kg ?? a.y ?? 0])
+    );
+    const predictedMap = Object.fromEntries(
+      prediksi.map(p => [p.x.split("T")[0], p.y ?? 0])
+    );
 
-        this.labels = semuaTanggal;
-        this.chartData = {
-          aktual: semuaTanggal.map(d => actualMap[d] ?? null),
-          prediksi: semuaTanggal.map(d => predictedMap[d] ?? null)
-        };
+    this.labels = semuaTanggal;
+    this.chartData = {
+      aktual: semuaTanggal.map(d => actualMap[d] ?? null),
+      prediksi: semuaTanggal.map(d => predictedMap[d] ?? null)
+    };
 
-        // --- Detail prediksi untuk table / CSV / PDF ---
-        this.predictedDetail = semuaTanggal.map(date => {
-          const pred = prediksi.find(p => p.x.split("T")[0] === date);
-          return {
-            date,
-            value: pred?.y ?? 0,
-            karung: Math.ceil((pred?.y ?? 0) / 50)
-          };
-        });
+    // --- Detail prediksi untuk CSV/PDF ---
+    this.predictedDetail = semuaTanggal.map(date => {
+      const pred = prediksi.find(p => p.x.split("T")[0] === date);
+      return {
+        date,
+        value: pred?.y ?? 0,
+        karung: Math.ceil((pred?.y ?? 0) / 50)
+      };
+    });
 
-        // --- Periode edges (highlight per minggu) ---
-        const periodeEdges = [];
-        for (let i = 0; i < semuaTanggal.length; i += 7) {
-          periodeEdges.push(i);
-          periodeEdges.push(Math.min(i + 6, semuaTanggal.length - 1));
-        }
-        this.periodeEdges = periodeEdges;
+    // --- Periode edges (highlight per minggu) ---
+    const periodeEdges = [];
+    for (let i = 0; i < semuaTanggal.length; i += 7) {
+      periodeEdges.push(i);
+      periodeEdges.push(Math.min(i + 6, semuaTanggal.length - 1));
+    }
+    this.periodeEdges = periodeEdges;
 
-        // --- Summary disesuaikan per mode ---
-        this.summary = {
-          ...apiSummary,
-          jumlah_ayam_awal: this.mode === 'per_ayam' ? apiSummary.jumlah_ayam_awal : undefined,
-          perkiraan_akhir_ayam: this.mode === 'per_ayam' ? apiSummary.perkiraan_akhir_ayam : undefined,
-          rata_per_ayam_kg_per_hari: this.mode === 'per_ayam' ? apiSummary.konsumsi_harian_per_ekor : undefined,
-          prediksi_jumlah_ayam: this.mode === 'per_periode' ? apiSummary.prediksi_jumlah_ayam : undefined,
-          catatan: apiSummary.catatan || ""
-        };
+    // --- Summary disesuaikan per mode ---
+    this.summary = {
+      ...apiSummary,
+      jumlah_ayam_awal: this.mode === 'per_ayam' ? apiSummary.jumlah_ayam_awal : undefined,
+      perkiraan_akhir_ayam: this.mode === 'per_ayam' ? apiSummary.perkiraan_akhir_ayam : undefined,
+      rata_per_ayam_kg_per_hari: this.mode === 'per_ayam' ? apiSummary.konsumsi_harian_per_ekor : undefined,
+      prediksi_jumlah_ayam: this.mode === 'per_periode' ? apiSummary.prediksi_jumlah_ayam : undefined,
+      catatan: apiSummary.catatan || ""
+    };
 
-        // // --- Simpan riwayat ke backend jika valid ---
-        if (simpan && this.summary?.total_prediksi_kg && !this.alreadySaved) {
-          await this.$nextTick();
-          await this.simpanRiwayatBackend();
-          this.alreadySaved = true; 
-        }
+    // --- Simpan riwayat ke backend jika valid ---
+    if (simpan && this.summary?.total_prediksi_kg && !this.alreadySaved) {
+      await this.$nextTick();
+      this.alreadySaved = true;
+      await this.simpanRiwayatBackend();
+    }
 
-      } catch (err) {
-        console.error("Gagal memuat prediksi:", err);
-        const msg = err.response?.data?.detail || err.response?.data?.message || "Gagal memuat prediksi";
-        Swal.fire("Error", typeof msg === "string" ? msg : JSON.stringify(msg), "error");
-      }
-      finally {
+  } catch (err) {
+    // --- Error handling lebih jelas ---
+    let msg = "Gagal memuat prediksi";
+    if (err.response) {
+      msg = err.response.data?.detail || err.response.data?.message || JSON.stringify(err.response.data);
+      console.error("❌ Error backend:", err.response.data);
+    } else {
+      console.error("❌ Error frontend / network:", err);
+    }
+    Swal.fire("Error", msg, "error");
+
+  } finally {
     this.isLoading = false;
-      }
-    },
+  }
+},
 
 
     async simpanRiwayatBackend() {
@@ -443,8 +466,6 @@ export default {
 
         // Tentukan asal_data & nama_file berdasarkan file_id
         const selectedFile = this.files.find(f => f.id.toString() === this.file_id);
-        // this.asal_data = this.file_id !== "default" ? "User Upload" : "Default";
-        // this.nama_file = this.file_id !== "default" ? selectedFile?.fileName || "Unknown.csv" : "Default";
         const asal_data = this.file_id !== "default" ? "User Upload" : "Default";
         const nama_file = this.file_id !== "default" ? selectedFile?.fileName || "Unknown.csv" : "Default";
 
@@ -455,9 +476,6 @@ export default {
           jumlah_ayam_awal: this.mode === "per_ayam" ? this.jumlah_ayam_awal || 1 : null,
           asal_data,
           nama_file,
-          // asal_data: this.file_id !== "default" ? "User Upload" : "Default",
-          // nama_file: this.file_id !== "default" ? selectedFile?.fileName || "Unknown.csv" : "Default",
-
           prediksi: prediksiStandar,
           data_aktual: aktualStandar,
           activity: `Prediksi ${this.mode} dari ${this.tanggal_mulai} sampai ${this.tanggal_selesai}`,

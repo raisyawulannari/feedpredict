@@ -126,7 +126,7 @@ export default {
           const headers = results.meta.fields;
 
           const requiredColumnsAlias = {
-            tanggal: ["tanggal", "date"],
+            tanggal: ["tanggal", "Tanggal", "tgl", "date"],
             jumlah_ayam_awal: ["jumlah_ayam_awal", "jumlah_ayam", "jml_ayam"],
             Pakan_Pakai: [
               "pakan_kg", "pakan", "pakankg", "pakanKg",
