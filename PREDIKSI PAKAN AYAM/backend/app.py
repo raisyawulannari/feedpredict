@@ -1495,7 +1495,7 @@ def load_data(file_id=None, user_id=None):
     else:
         df['pakan_aktual_total'] = df['pakan_pakai']
 
-    print(df[['tanggal', 'jumlah_ayam', 'pakan_pakai', 'pakan_aktual_total']])
+    # print(df[['tanggal', 'jumlah_ayam', 'pakan_pakai', 'pakan_aktual_total']])
 
     return df, {"nama_file": nama_file, "asal_data": asal_data}
 
@@ -1607,7 +1607,7 @@ def prediksi_harian(series, jumlah_ayam, tanggal_index=None, smooth_window=3, de
         print("="*60)
         print(f"Parameter ARIMA terpilih: {model.order if model else '-'}")
         print(f"MAPE total keseluruhan : {mape_total_keseluruhan:.2f}%")
-        print("Forecast vs Aktual (sample 10):")
+        # print("Forecast vs Aktual (sample 10):")
         for i in range(min(10, len(total_prediksi))): actual_value = series.iloc[i]
         print(f"{series.index[i].date()} | Prediksi: {total_prediksi[i]:.1f} kg | Aktual: {actual_value:.1f} kg | Selisih: {total_prediksi[i]-actual_value:.1f}")
         print("="*60)
@@ -1654,7 +1654,7 @@ def train_arima(series, satuan="kg", smooth_window=3, debug=False):
     forecast = model.predict(n_periods=len(test))
     mape = hitung_mape_stabil(list(forecast), list(test))
 
-    print(f"Forecast vs Aktual (sample 5): {list(forecast[:5])} vs {list(test[:5])}")
+    # print(f"Forecast vs Aktual (sample 5): {list(forecast[:5])} vs {list(test[:5])}")
 
     if debug:
         print(f"Train size: {len(train)}, Test size: {len(test)}")
@@ -2352,17 +2352,94 @@ async def predict_per_ayam(request: Request, current_user: dict = Depends(get_cu
         mean_per_ayam = float(per_ayam_series.mean())
         konsumsi_harian_per_ekor = mean_per_ayam
 
+        #---#
         # --- Latih ARIMA ---
         try:
             model, forecast_train, test, mape_train = train_arima(per_ayam_series, debug=True)
             forecast_per_ayam = np.array(model.predict(n_periods=hari))
-            print(f"\n===== ARIMA INFO =====")
-            print(f"Parameter ARIMA (p,d,q): {model.order if model else '-'}")
+
+            # 🔹 Info ARIMA
+            print("\n===== ARIMA INFO =====")
+            if model:
+                p, d, q = model.order
+                ar_params = model.arparams() if p > 0 else None
+                ma_params = model.maparams() if q > 0 else None
+
+                print(f"Parameter ARIMA (P,D,Q): ({p},{d},{q})")
+                
+                # Keterangan parameter
+                print("Keterangan tiap parameter:")
+                print(f" - P (AR lag) : jumlah lag autoregressive (menggunakan nilai historis sebelumnya)")
+                print(f" - D (Differencing) : jumlah differencing untuk membuat data stasioner")
+                print(f" - Q (MA lag) : jumlah lag moving average (menggunakan error sebelumnya)")
+
+                # Koefisien AR
+                if ar_params is not None:
+                    ar_list = ", ".join([f"{v:.8f}" for v in ar_params])
+                    print(f"Koefisien AR (φ1,..) : {ar_list}  (nilai P={p})")
+                else:
+                    print(f"Koefisien AR (φ1,..) : -  (nilai P={p})")
+
+                # Koefisien MA
+                if ma_params is not None:
+                    ma_list = ", ".join([f"{v:.8f}" for v in ma_params])
+                    print(f"Koefisien MA (θ1,..) : {ma_list}  (nilai Q={q})")
+                else:
+                    print(f"Koefisien MA (θ1,..) : -  (nilai Q={q})")
+
+                # Differencing
+                print(f"Differencing (d)      : {d if d > 0 else 0}  (nilai D)")
+
             print("=======================")
-            print(f"Forecast vs Aktual (sample 5): {forecast_train[:5]} vs {test[:5]}")
+
+
+            # 🔹 Pastikan df memiliki kolom 'pakan_pakai' dan index datetime
+            df = df.copy()
+            df.columns = df.columns.str.strip()
+            if 'pakan_pakai' not in df.columns:
+                raise ValueError("Kolom 'pakan_pakai' tidak ditemukan!")
+
+            if 'tanggal' in df.columns:
+                df['tanggal'] = pd.to_datetime(df['tanggal'], dayfirst=True)
+                df.set_index('tanggal', inplace=True)
+            elif not isinstance(df.index, pd.DatetimeIndex):
+                raise ValueError("Index df bukan datetime dan kolom 'tanggal' tidak ada!")
+
+            df = df.sort_index()
+
+           # 🔹 Ambil data historis untuk Y(t-1)..Y(t-P) 
+            if p > 0:
+                df_hist = df[df.index < tanggal_mulai].copy()
+                if len(df_hist) >= p:
+                    # ambil P tanggal terakhir sebelum tanggal_mulai
+                    tgl_sebelum = df_hist.index[-p:]
+                    yt_prev = [float(df_hist.loc[t, 'pakan_pakai']) for t in tgl_sebelum]
+
+                    print(f"\n===== Nilai Y(t-1)..Y(t-{p}) sebelum tanggal input {tanggal_mulai.date()} =====")
+                    # cetak dari tanggal terbaru ke terlama
+                    for i, t in enumerate(tgl_sebelum[::-1]):
+                        print(f"{i+1}. {t.date()} | Pakan pakai = {yt_prev[-(i+1)]:.2f} kg")
+                else:
+                    print(f"Data historis tidak cukup untuk menampilkan Y(t-1)..Y(t-{p})")
+
+
+            # 🔹 Summary dan detail harian
+            total_aktual = df['pakan_pakai'].loc[tanggal_mulai:tanggal_mulai+pd.Timedelta(days=hari-1)].sum()
+            total_prediksi = forecast_per_ayam.sum()
+            total_karung_aktual = total_aktual / 50
+            total_karung_prediksi = total_prediksi / 50
+
+            for i in range(hari):
+                tgl = tanggal_mulai + pd.Timedelta(days=i)
+                pred = forecast_per_ayam[i]
+                aktual = df['pakan_pakai'].get(tgl, np.nan)
+                selisih = pred - aktual if not np.isnan(aktual) else np.nan
+                # print(f"{tgl.date()} | {pred:12.2f} | {aktual if not np.isnan(aktual) else '-':12} | {selisih if not np.isnan(selisih) else '-':14}")
+
         except Exception as e:
-            print("WARNING: ARIMA gagal, pakai rata-rata per_ayam", e)
+            print("WARNING: ARIMA gagal, pakai rata-rata per_ayam:", e)
             forecast_per_ayam = np.full(hari, mean_per_ayam)
+
 
 
         # --- Hitung prediksi harian ---
