@@ -1,27 +1,34 @@
+# === Built-in Modules ===
 import csv
 import hashlib
 import io
 import math
-import json
 import os
 import re
-import json, math
 import shutil
 import secrets
 import traceback
-from typing import List
-from sqlalchemy.orm import Session
 import uuid
-import pandas as pd
+import json
 import warnings
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+import sys
+import smtplib
+from email.mime.text import MIMEText
+from datetime import date, datetime, timedelta
+from typing import List, Optional, Dict, Any
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+
+# === Third-party Modules ===
 import jwt
 import numpy as np
+import pandas as pd
 from pmdarima import auto_arima
 from statsmodels.tools.sm_exceptions import ValueWarning
 from xhtml2pdf import pisa
+import mysql.connector
 
+# === FastAPI Modules ===
 from fastapi import (
     FastAPI,
     Request,
@@ -41,15 +48,28 @@ from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.security import OAuth2PasswordBearer
+
+# === FastAPI Mail ===
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
+
+# === Google Auth ===
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+
+# === Pydantic & SQLAlchemy ===
 from pydantic import BaseModel
-from fastapi import Body
-import mysql.connector
+from sqlalchemy.orm import Session
+
+# === Local Modules ===
+from passlib.context import CryptContext
 from auth import router as auth_router
 from database import get_db_connection
+
+# === Warning Filters ===
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=ValueWarning)
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore")  # Ignore all other warnings
 
 
 # --------- FastAPI App ---------
@@ -78,6 +98,7 @@ def ping():
 SECRET_KEY = os.environ.get("SECRET_KEY", "ini_kunci_rahasia_default")
 ALGORITHM = "HS256"
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
+GOOGLE_CLIENT_ID = "551825862751-iimpdde6vqho5l2ter279vp6len187kl.apps.googleusercontent.com"
 
 # --------- Schemas ---------
 class RegisterSchema(BaseModel):
@@ -95,6 +116,63 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=1
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+# =====================
+# Fungsi kirim notifikasi (async)
+# =====================
+
+def send_admin_notification(name, email):
+    try:
+        sender = "raisyawulan04@gmail.com"
+        recipient = "raisyawulan04@gmail.com"  # email admin
+
+        subject = "APLIKASI FEED PREDICT! Notifikasi Registrasi User Baru"
+
+        # buat token unik (opsional, kalau mau dicek lebih aman)
+        token = secrets.token_urlsafe(16)
+
+        # ✅ Link verifikasi YA / TIDAK
+        verify_yes = f"http://localhost:8000/api/admin/verify?email={email}&action=yes&token={token}"
+        verify_no  = f"http://localhost:8000/api/admin/verify?email={email}&action=no&token={token}"
+
+        body = f"""
+        Halo Admin,
+
+        Ada user baru yang registrasi:
+
+        Nama  : {name}
+        Email : {email}
+
+        Silakan pilih salah satu:
+        ✅ Verifikasi: {verify_yes}
+        ❌ Tolak     : {verify_no}
+        """
+
+        msg = MIMEText(body)
+        msg["From"] = sender
+        msg["To"] = recipient
+        msg["Subject"] = subject
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender, "sizr qxvt xgem ikin")  # App Password Gmail
+            server.sendmail(sender, [recipient], msg.as_string())
+
+        print("✅ Email notifikasi terkirim ke admin")
+
+    except Exception as e:
+        print(f"❌ Gagal mengirim email notifikasi: {e}")
+
+
+
+# =====================
+# Fungsi koneksi database
+# =====================
+def get_db_connection():
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="",
+        database="prediksi_db"
+    )
 
 # --------- Dependency Cek User ---------
 
@@ -113,61 +191,159 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 #===================
 # Endpoint Register
 #===================
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+from fastapi import BackgroundTasks
+
 @app.post("/api/register")
-def register(data: RegisterSchema):
-    if len(data.password) != 8:
-        raise HTTPException(status_code=400, detail="Password harus 8 karakter")
+def register(data: RegisterSchema, background_tasks: BackgroundTasks):
+    # Validasi panjang password minimal 8 karakter
+    if len(data.password) < 8:
+        raise HTTPException(status_code=400, detail="Password minimal 8 karakter")
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    # cek email sudah ada?
+    # Cek email sudah ada
     cursor.execute("SELECT * FROM users WHERE email=%s", (data.email,))
     if cursor.fetchone():
         cursor.close()
         conn.close()
         raise HTTPException(status_code=400, detail="Email sudah terdaftar")
 
-    # simpan password langsung, tanpa hash
+    # Hash password
+    hashed_password = pwd_context.hash(data.password)
+
+    # Simpan user, status belum terverifikasi
     cursor.execute(
-        "INSERT INTO users (name, email, password, role) VALUES (%s, %s, %s, %s)",
-        (data.name, data.email, data.password, "user")  # langsung simpan 8 karakter
+        "INSERT INTO users (name, email, password, role, is_verified, created_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
+        (data.name, data.email, hashed_password, "user", 0)
     )
     conn.commit()
     cursor.close()
     conn.close()
 
-    return {"message": "User berhasil didaftarkan!"}
+    # --- Kirim notifikasi ke admin di background ---
+    background_tasks.add_task(send_admin_notification, data.name, data.email)
 
-#================
-# Endpoint Login
-#================
+    return {"message": "User berhasil didaftarkan! Tunggu verifikasi admin sebelum login."}
+
+
+# =========================
+# Endpoint Login Manual
+# =========================
 @app.post("/api/login")
-def login(data: LoginSchema):
+def login(data: dict):
+    email = data.get("email")
+    password = data.get("password")
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM users WHERE email=%s", (data.email,))
+    cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
     user = cursor.fetchone()
     cursor.close()
     conn.close()
 
     if not user:
         raise HTTPException(status_code=401, detail="Email tidak ditemukan")
-    if user['password'] != data.password:
+    if not user['is_verified']:
+        raise HTTPException(status_code=403, detail="Akun belum diverifikasi oleh admin")
+
+    if not pwd_context.verify(password, user['password']):
         raise HTTPException(status_code=401, detail="Password salah")
 
-    token = create_access_token(
-        data={"user_id": user["id"], "role": user["role"]},
-        expires_delta=timedelta(hours=1)
-    )
+    token = create_access_token({"user_id": user["id"], "role": user["role"]})
+    return {"access_token": token, "role": user["role"], "name": user["name"]}
 
-    return {
-        "access_token": token,
-        "role": user["role"],
-        "name": user["name"]
-    }
 
-# --- Schema untuk request reset password ---
+# =========================
+# Endpoint Login Google
+# =========================
+@app.post("/api/login-google")
+def login_google(data: dict):
+    id_token_google = data.get("id_token")  
+    if not id_token_google:
+        raise HTTPException(status_code=400, detail="ID token Google diperlukan")
+
+    try:
+        # Verifikasi token Google
+        idinfo = id_token.verify_oauth2_token(
+            id_token_google,
+            google_requests.Request(),
+            GOOGLE_CLIENT_ID
+        )
+        email = idinfo.get("email")
+        google_user_id = idinfo.get("sub")  # unik untuk akun Google
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
+        user = cursor.fetchone()
+
+        if not user:
+            # Bisa otomatis register atau tolak login
+            raise HTTPException(status_code=401, detail="Email belum terdaftar")
+        if not user['is_verified']:
+            raise HTTPException(status_code=403, detail="Akun belum diverifikasi oleh admin")
+
+        # Update google_id jika kosong
+        if not user.get('google_id'):
+            cursor.execute(
+                "UPDATE users SET google_id=%s WHERE id=%s",
+                (google_user_id, user["id"])
+            )
+            conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        # Buat JWT internal aplikasi
+        token = create_access_token({"user_id": user["id"], "role": user["role"]})
+        return {"access_token": token, "role": user["role"], "name": user["name"]}
+
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Token Google tidak valid")
+
+# =========================
+# ENDPOINT VERIFIKASI VIA LINK
+# =========================
+@app.get("/api/admin/verify")
+def verify_user(email: str, token: str, action: str):
+    """
+    action = "yes" → verifikasi
+    action = "no"  → tolak
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
+    user = cursor.fetchone()
+    if not user:
+        cursor.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="User tidak ditemukan")
+
+    if action == "yes":
+        cursor.execute("UPDATE users SET is_verified=1 WHERE email=%s", (email,))
+        conn.commit()
+        message = f"Akun {email} berhasil diverifikasi ✅"
+    elif action == "no":
+        cursor.execute("UPDATE users SET is_verified=0 WHERE email=%s", (email,))
+        conn.commit()
+        message = f"Akun {email} ditolak ❌"
+    else:
+        cursor.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Action tidak valid")
+
+    cursor.close()
+    conn.close()
+    return {"message": message}
+
+
+# schema
 class ResetPasswordSchema(BaseModel):
     email: str
     new_password: str
@@ -186,10 +362,15 @@ def reset_password(data: ResetPasswordSchema):
         conn.close()
         raise HTTPException(status_code=404, detail="Email tidak ditemukan")
 
-    # update password
-    cursor.execute("UPDATE users SET password=%s WHERE email=%s", (data.new_password, data.email))
-    conn.commit()
+    # hash password baru
+    hashed_password = pwd_context.hash(data.new_password)
 
+    # update password
+    cursor.execute(
+        "UPDATE users SET password=%s WHERE email=%s",
+        (hashed_password, data.email)
+    )
+    conn.commit()
     cursor.close()
     conn.close()
 
@@ -435,7 +616,7 @@ def get_admin_riwayat_detail(id: int, user=Depends(get_current_user)):
             "summary": summary,
             "nama_file": row.get("nama_file"),
             "asal_data": row.get("asal_data"),
-            "user_id": row.get("user_id")  # bisa diganti join ke user table kalau mau nama
+            "user_id": row.get("user_id") 
         }
 
         return response
@@ -485,14 +666,33 @@ def sanitize_json(obj):
     else:
         return str(obj)
 
-def get_db_connection():
-    return mysql.connector.connect(
-        host="localhost", user="root", password="", database="prediksi_db"
-    )
 
-# ===============
-# Simpan riwayat
-# ==============
+def set_active_riwayat(riwayat_id, is_active: bool):
+    try:
+        conn = get_db_connection()
+        with conn.cursor(buffered=True) as cursor:
+            sql = "UPDATE riwayat SET is_active = %s WHERE id = %s"
+            cursor.execute(sql, (int(is_active), riwayat_id))
+            conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print("Error set_active_riwayat:", e)
+        return False
+
+def get_active_riwayat(user_id):
+    conn = get_db_connection()
+    with conn.cursor(dictionary=True) as cursor:
+        sql = "SELECT * FROM riwayat WHERE user_id=%s AND is_active=1"
+        cursor.execute(sql, (user_id,))
+        result = cursor.fetchall()
+    conn.close()
+    return result
+
+
+# ====================
+# Simpan riwayat user
+# ====================
 @app.post("/riwayat")
 async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_user)):
     conn = cursor = None
@@ -623,6 +823,7 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
             mode_prediksi,
             nama_file,
             asal_data
+            
         ))
         existing = cursor.fetchone()
         if existing:
@@ -630,32 +831,34 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
 
         activity = data.get("activity") or f"Prediksi {mode_prediksi} dari {tanggal_mulai.date()} sampai {tanggal_selesai.date()}"
         mape = data.get("mape") or None
+        is_active = bool(data.get("is_active", False))
 
         cursor.execute(
-            """
-            INSERT INTO riwayat
-            (user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, data_aktual,
-            total_pakan_kg, total_karung, mode_prediksi, jumlah_ayam_awal, activity,
-            mape, asal_data, nama_file, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-            """,
-            (
-                current_user_id,
-                tanggal_mulai.strftime("%Y-%m-%d"),
-                tanggal_selesai.strftime("%Y-%m-%d"),
-                durasi,
-                json.dumps(standar_prediksi),
-                json.dumps(standar_aktual),
-                total_pakan,
-                total_karung,
-                mode_prediksi,
-                jumlah_ayam_awal_db,
-                activity,
-                mape,
-                asal_data,
-                nama_file
-            )
+        """
+        INSERT INTO riwayat
+        (user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, data_aktual,
+        total_pakan_kg, total_karung, mode_prediksi, jumlah_ayam_awal, activity,
+        mape, asal_data, nama_file, is_active, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+        """,
+        (
+            current_user_id,
+            tanggal_mulai.strftime("%Y-%m-%d"),
+            tanggal_selesai.strftime("%Y-%m-%d"),
+            durasi,
+            json.dumps(standar_prediksi),
+            json.dumps(standar_aktual),
+            total_pakan,
+            total_karung,
+            mode_prediksi,
+            jumlah_ayam_awal_db,
+            activity,
+            mape,
+            asal_data,
+            nama_file,
+            is_active 
         )
+    )
         conn.commit()
         riwayat_id = cursor.lastrowid
         return {"message": "Riwayat berhasil disimpan", "riwayat_id": riwayat_id}
@@ -761,10 +964,15 @@ async def get_riwayat(current_user: dict = Depends(get_current_user)):
                 "nama_file": nama_file,
                 "activity": activity,
                 "created_at": created_at,
-                "updated_at": updated_at
+                "updated_at": updated_at,
+                "is_active": bool(row.get("is_active", 0))
             })
 
         return {"riwayat": result}
+    except Exception as e:
+        if cursor: cursor.close()
+        if conn: conn.close()
+        raise HTTPException(status_code=500, detail=f"Error ambil riwayat: {str(e)}")
 
     finally:
         if cursor: cursor.close()
@@ -990,7 +1198,116 @@ async def hapus_riwayat(
             cursor.close()
         if conn:
             conn.close()
-            
+
+@app.put("/riwayat/{riwayat_id}/set_active")
+async def set_active_riwayat(riwayat_id: int, current_user: dict = Depends(get_current_user)):
+    conn = cursor = None
+    try:
+        user_id = current_user.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User tidak valid")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # ✅ Set semua riwayat user ke nonaktif dulu
+        cursor.execute("UPDATE riwayat SET is_active=0 WHERE user_id=%s", (user_id,))
+
+        # ✅ Set hanya riwayat_id yg dipilih jadi aktif
+        cursor.execute("UPDATE riwayat SET is_active=1 WHERE id=%s AND user_id=%s", (riwayat_id, user_id))
+        conn.commit()
+
+        return {"message": f"Riwayat {riwayat_id} berhasil dijadikan aktif"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error set aktif riwayat: {str(e)}")
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
+# Format tanggal bahasa Indonesia (Windows friendly)
+def format_tanggal(tanggal_obj):
+    bulan = [
+        "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+    ]
+    return f"{tanggal_obj.day} {bulan[tanggal_obj.month-1]} {tanggal_obj.year}"
+
+@app.get("/notifications")
+async def get_notifications(current_user: dict = Depends(get_current_user)):
+    user_id = current_user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User tidak valid")
+
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    notifications = []
+
+    riwayat_list = get_active_riwayat(user_id)
+    for r in riwayat_list:
+        t_mulai = r["tanggal_mulai"]
+        t_selesai = r["tanggal_selesai"]
+        total_kg = r.get("total_pakan_kg", 0)
+        karung_total = r.get("total_karung", 0)
+        t_mulai_str = format_tanggal(t_mulai)
+        t_selesai_str = format_tanggal(t_selesai)
+
+        # 1️⃣ Prediksi sudah lewat
+        if t_selesai < today:
+            notifications.append({
+                "id": r["id"],
+                "message": f"Prediksi {t_mulai_str} - {t_selesai_str} sudah kadaluarsa. Sekarang tanggal {format_tanggal(today)}.",
+                "created_at": r.get("created_at", datetime.now())
+            })
+
+        # 2️⃣ Prediksi belum mulai
+        elif t_mulai > today:
+            notifications.append({
+                "id": r["id"],
+                "message": f"Prediksi {t_mulai_str} - {t_selesai_str}: {total_kg} kg ({karung_total} karung) ⏳ (Belum mulai)",
+                "created_at": r.get("created_at", datetime.now())
+            })
+
+        # 3️⃣ Prediksi aktif hari ini
+        else:
+            notifications.append({
+                "id": r["id"],
+                "message": f"Prediksi {t_mulai_str} - {t_selesai_str}: {total_kg} kg ({karung_total} karung) ✅ (Aktif)",
+                "created_at": r.get("created_at", datetime.now())
+            })
+
+            # Notifikasi untuk besok → ambil dari kolom `prediksi` JSON
+            try:
+                prediksi_list = json.loads(r.get("prediksi", "[]"))
+                prediksi_besok = next(
+                    (item for item in prediksi_list if item["x"] == tomorrow.isoformat()),
+                    None
+                )
+                if prediksi_besok:
+                    kg_besok = prediksi_besok.get("kg", 0)
+                    karung_besok = math.ceil(kg_besok / 50)
+                    notifications.append({
+                        "id": r["id"],
+                        "message": f"Prediksi pakan untuk besok {format_tanggal(tomorrow)}: {kg_besok:.2f} kg ({karung_besok} karung) ⚠️ Siapkan pakan agar stok cukup.",
+                        "created_at": r.get("created_at", datetime.now())
+                    })
+            except Exception as e:
+                print("Error parsing prediksi JSON:", e)
+
+    # Jika tidak ada notifikasi
+    if not notifications:
+        notifications.append({
+            "id": 0,
+            "message": "Belum ada riwayat prediksi aktif atau prediksi untuk besok.",
+            "created_at": datetime.now()
+        })
+
+    # Urutkan terbaru dulu
+    notifications.sort(key=lambda x: x["created_at"], reverse=True)
+    return {"notifications": notifications}
+
+
 #=================
 # class datapakan
 #=================
@@ -1019,11 +1336,10 @@ def save_to_csv(data: DataPakan):
         # tulis baris data
         writer.writerow([data.tanggal_mulai, data.tanggal_selesai, data.jumlah_ayam_awal, data.file_id])
 
-
-def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_prediksi):
+def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_prediksi, is_active=False):
     try:
-        total_karung = sum([item.get("y", 0) for item in hasil_prediksi])
         total_kg = sum([item.get("kg", 0) for item in hasil_prediksi])
+        total_karung = math.ceil(total_kg / 50)  # ✅ lebih konsisten
 
         # --- LOG ---
         print("=== INFO simpan_riwayat ===")
@@ -1032,14 +1348,16 @@ def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_predi
         print(f"Durasi (hari): {durasi}")
         print(f"Total pakan (kg): {total_kg}")
         print(f"Total karung: {total_karung}")
+        print(f"is_active: {is_active}")
         print("============================")
 
         conn = get_db_connection()
         with conn.cursor(buffered=True) as cursor:
             sql = """
                 INSERT INTO riwayat (
-                    user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, total_karung
-                ) VALUES (%s, %s, %s, %s, %s, %s)
+                    user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, 
+                    total_karung, is_active
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
             val = (
                 user_id,
@@ -1047,7 +1365,8 @@ def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_predi
                 (tanggal_mulai + timedelta(days=durasi-1)).strftime("%Y-%m-%d"),
                 durasi,
                 json.dumps(hasil_prediksi),
-                total_karung
+                total_karung,
+                int(is_active)  # ✅ simpan sebagai 0/1
             )
             cursor.execute(sql, val)
             conn.commit()
@@ -1056,30 +1375,44 @@ def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_predi
         return True
 
     except Exception as e:
-        import traceback
         traceback.print_exc()
         if 'conn' in locals():
             conn.close()
         return False
 
+
 #=================
 # FUNGSI LOAD DATA
 #=================
-# ------------------- load_data.py -------------------
+# Konversi pakan ke kg
+def konversi_pakan(nilai, satuan="kg"):
+    if satuan == "karung":
+        return nilai * 50  # 1 karung = 50 kg
+    return nilai  # jika sudah kg
+
+# --- Load CSV (default atau user upload) ---
 def load_data(file_id=None, user_id=None):
+    """
+    Load data pakan ayam dari CSV default atau upload user
+    Output: dataframe, metadata {'nama_file', 'asal_data'}
+    """
+    import pandas as pd
+    import os
+
     print("load_data dipanggil dengan file_id:", file_id, "user_id:", user_id)
 
-
-    file_path = CSV_PATH
+    file_path = CSV_PATH  # default CSV path
     nama_file = "Default"
     asal_data = "Default"
 
-    # --- Ambil file upload user jika ada ---
+    # Ambil file upload user jika ada
     if file_id and file_id != "default":
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT file_name, file_path FROM data_pakan WHERE id=%s AND user_id=%s",
-                       (file_id, user_id))
+        cursor.execute(
+            "SELECT file_name, file_path FROM data_pakan WHERE id=%s AND user_id=%s",
+            (file_id, user_id)
+        )
         row = cursor.fetchone()
         cursor.close()
         conn.close()
@@ -1087,15 +1420,17 @@ def load_data(file_id=None, user_id=None):
         if row and row["file_path"] and os.path.exists(row["file_path"]):
             file_path = row["file_path"].replace("\\", "/")
             nama_file = row["file_name"]
-            asal_data = "User Upload" if file_id != "default" else "Default"
-            
+            asal_data = "User Upload"
+
     print(f"load_data: pakai file '{nama_file}' dari '{asal_data}' → path: {file_path}")
 
-    # --- Load CSV ---
-    df = pd.read_csv(file_path)
+    # --- Load CSV dengan ribuan dan desimal benar ---
+    df = pd.read_csv(file_path, thousands='.', decimal=',')
+
+    # Bersihkan nama kolom
     df.rename(columns=lambda x: x.strip().lower(), inplace=True)
 
-    # --- Ganti nama bulan Indonesia ke English ---
+    # --- Ganti nama bulan Indonesia ke English untuk parsing tanggal ---
     ind_to_eng_month = {
         'Januari': 'January', 'Februari': 'February', 'Maret': 'March',
         'April': 'April', 'Mei': 'May', 'Juni': 'June',
@@ -1109,24 +1444,190 @@ def load_data(file_id=None, user_id=None):
     # --- Konversi tanggal ---
     df['tanggal'] = pd.to_datetime(df['tanggal'], format='%d %B %Y', errors='coerce')
 
-    # --- Konversi angka (replace koma → titik) ---
-    for col in ['pakan_pakai','jumlah_ayam','jumlah_ayam_mati']:
-        df[col] = df[col].astype(str).str.replace(',', '.').astype(float)
+    # --- Pastikan kolom penting ada ---
+    for col in ['pakan_pakai', 'jumlah_ayam', 'jumlah_ayam_mati', 'pakan_pakai_karung']:
+        if col not in df.columns:
+            df[col] = 0.0
 
-    print("DEBUG baris sebelum filter:", len(df))
-
-    # --- Filter hanya baris valid ---
-    df.dropna(subset=['tanggal','pakan_pakai','jumlah_ayam','jumlah_ayam_mati'], inplace=True)
+    # --- Filter baris valid ---
+    df.dropna(subset=['tanggal'], inplace=True)
     df = df[(df['pakan_pakai'] > 0) & (df['jumlah_ayam'] > 0)]
-
-    print("DEBUG baris setelah filter:", len(df))
-
     df.sort_values('tanggal', inplace=True)
     df.reset_index(drop=True, inplace=True)
+
+    # --- Hitung pakan total ---
+    if 'pakan_pakai_karung' in df.columns and df['pakan_pakai_karung'].sum() > 0:
+        df['pakan_aktual_total'] = df.apply(
+            lambda row: row['pakan_pakai_karung']*50 if row['pakan_pakai_karung']>0 else row['pakan_pakai'], axis=1
+        )
+    else:
+        df['pakan_aktual_total'] = df['pakan_pakai']
+
+    print(df[['tanggal', 'jumlah_ayam', 'pakan_pakai', 'pakan_aktual_total']])
 
     return df, {"nama_file": nama_file, "asal_data": asal_data}
 
 
+
+# ========================
+# Fungsi hitung MAPE stabil
+# ========================
+def hitung_mape_stabil(prediksi, aktual, min_aktual=50):
+    """
+    MAPE stabil: hindari nilai ekstrem saat aktual terlalu kecil
+    prediksi : array-like
+    aktual : array-like
+    min_aktual : nilai minimal aktual untuk hindari pembagian 0
+    """
+    pred = np.array(prediksi)
+    act = np.array(aktual)
+    act_safe = np.maximum(act, min_aktual)
+    mape = np.mean(np.abs((act - pred) / act_safe)) * 100
+    return mape
+
+# ========================
+# Fungsi prediksi harian
+# ========================
+def prediksi_harian(series, jumlah_ayam, tanggal_index=None, smooth_window=3, debug=False):
+    """
+    Prediksi harian realistis dengan ARIMA per-ayam
+    series : pandas Series total pakan (kg)
+    jumlah_ayam : pandas Series jumlah ayam harian
+    tanggal_index : pd.DatetimeIndex
+    smooth_window : ukuran rolling mean
+    debug : True/False
+    """
+    series = series.copy()
+    jumlah_ayam = jumlah_ayam.copy()
+
+    # Tangani missing / nol
+    series.replace(0, np.nan, inplace=True)
+    series.fillna(method='ffill', inplace=True)
+    series.fillna(method='bfill', inplace=True)
+
+    # Clip outlier 5%-95%
+    lower, upper = series.quantile(0.05), series.quantile(0.95)
+    series = series.clip(lower=lower, upper=upper)
+
+    # Rolling smoothing ringan
+    if len(series) >= smooth_window:
+        series = series.rolling(window=smooth_window, min_periods=1).mean()
+
+    # Index tanggal
+    if tanggal_index is not None:
+        series.index = pd.to_datetime(tanggal_index)
+        jumlah_ayam.index = pd.to_datetime(tanggal_index)
+    else:
+        series.index = pd.date_range(start=pd.Timestamp.today(), periods=len(series), freq='D')
+        jumlah_ayam.index = series.index
+
+    # Tangani jumlah ayam 0 atau NaN
+    jumlah_ayam_safe = jumlah_ayam.replace(0, np.nan).fillna(method='ffill').fillna(method='bfill')
+
+    # Prediksi per ayam
+    pakan_per_ayam = series / jumlah_ayam_safe
+
+    # Latih ARIMA seluruh data historis
+    try:
+        model = auto_arima(
+            pakan_per_ayam,
+            seasonal=False,
+            stepwise=True,
+            suppress_warnings=True,
+            error_action='ignore'
+        )
+        # Forecast sepanjang periode
+        forecast_per_ayam = model.predict(n_periods=len(pakan_per_ayam))
+    except Exception as e:
+        if debug:
+            print("ARIMA gagal, fallback rata-rata:", e)
+        forecast_per_ayam = np.full(len(pakan_per_ayam), pakan_per_ayam.mean())
+        model = None
+
+    # Total pakan = per-ayam * jumlah ayam
+    total_prediksi = forecast_per_ayam * jumlah_ayam_safe.values
+
+    # Data prediksi harian
+    data_prediksi = []
+    total_kg = 0
+    for i, p in enumerate(total_prediksi):
+        kg = round(float(p), 2)
+        karung = math.ceil(kg / 50)
+        data_prediksi.append({
+            "hari_ke": i + 1,
+            "tanggal": str(series.index[i].date()),
+            "kg": kg,
+            "karung_50kg": karung,
+            "per_ayam": round(forecast_per_ayam[i], 2),
+            "jumlah_ayam": int(jumlah_ayam_safe.iloc[i])
+        })
+        total_kg += kg
+    total_karung = math.ceil(total_kg / 50)
+
+    # Evaluasi MAPE total keseluruhan
+    total_aktual_kg = series.sum()
+    mape_total_keseluruhan = abs(total_kg - total_aktual_kg) / total_aktual_kg * 100
+
+
+    if debug:
+        print("\n" + "="*60)
+        print("            🚀 PREDIKSI HARIAN DIMULAI")
+        print("="*60)
+        print(f"Parameter ARIMA terpilih: {model.order if model else '-'}")
+        print(f"MAPE total keseluruhan : {mape_total_keseluruhan:.2f}%")
+        print("Forecast vs Aktual (sample 10):")
+        for i in range(min(10, len(total_prediksi))):
+            print(f"{series.index[i].date()} | Prediksi: {total_prediksi[i]:.1f} kg | Aktual: {actual_values[i]:.1f} kg | Selisih: {total_prediksi[i]-actual_values[i]:.1f}")
+        print("="*60)
+
+    return data_prediksi, total_kg, total_karung, mape_total_keseluruhan, model, total_prediksi, series
+
+# ========================
+# Fungsi train_arima
+# ========================
+def train_arima(series, satuan="kg", smooth_window=3, debug=False):
+    """
+    Latih model ARIMA
+    series : pandas Series (kg atau karung)
+    satuan : "kg" atau "karung"
+    smooth_window : ukuran rolling mean untuk smoothing
+    debug : kalau True, print info tambahan
+    """
+    
+    # Pastikan dalam kg
+    series_kg = series.apply(lambda x: konversi_pakan(x, satuan))
+
+    # Smoothing rolling mean
+    if len(series_kg) >= smooth_window:
+        series_kg = series_kg.rolling(window=smooth_window, min_periods=1).mean()
+
+    if len(series_kg) < 10 or series_kg.nunique() <= 1:
+        raise ValueError("Data tidak cukup atau terlalu seragam untuk ARIMA.")
+
+    if not isinstance(series_kg.index, pd.DatetimeIndex):
+        series_kg.index = pd.date_range(start=pd.Timestamp.today(), periods=len(series_kg), freq='D')
+
+    train_size = int(len(series_kg) * 0.8)
+    train, test = series_kg.iloc[:train_size], series_kg.iloc[train_size:]
+
+    # 🔹 Auto ARIMA
+    model = auto_arima(
+        train,
+        seasonal=False,
+        stepwise=True,
+        suppress_warnings=True,
+        error_action='ignore'
+    )
+
+    forecast = model.predict(n_periods=len(test))
+    mape = hitung_mape_stabil(list(forecast), list(test))
+
+    print(f"Forecast vs Aktual (sample 5): {list(forecast[:5])} vs {list(test[:5])}")
+
+    if debug:
+        print(f"Train size: {len(train)}, Test size: {len(test)}")
+
+    return model, forecast, test, mape
 
 def get_periode_boundaries(df):
     if 'periode' in df.columns and df['periode'].notna().any():
@@ -1165,52 +1666,10 @@ def get_periode_edge_indexes(df, labels, tanggal_mulai_prediksi, tanggal_selesai
             pass
     return sorted(indexes)
 
-def hitung_mape_kg(prediksi, aktual):
-    """
-    prediksi dan aktual adalah list dict dengan key 'kg'
-    MAPE = rata-rata |prediksi - aktual| / aktual * 100
-    """
-    if not prediksi or not aktual:
-        return 0.0
 
-    # pastikan tanggal sama
-    tanggal_prediksi = {p['x']: p['kg'] for p in prediksi}
-    tanggal_aktual = {a['x']: a['kg'] for a in aktual}
 
-    common_dates = set(tanggal_prediksi.keys()) & set(tanggal_aktual.keys())
-    if not common_dates:
-        return 0.0
 
-    error_sum = 0
-    n = 0
-    for t in common_dates:
-        actual_val = tanggal_aktual[t]
-        if actual_val == 0:
-            continue
-        error_sum += abs(tanggal_prediksi[t] - actual_val) / actual_val
-        n += 1
 
-    if n == 0:
-        return 0.0
-
-    return round((error_sum / n) * 100, 2)
-
-def train_arima(series):
-    if len(series) < 10 or series.nunique() <= 1:
-        raise ValueError("Data tidak cukup atau terlalu seragam untuk ARIMA.")
-    
-    # Pastikan index datetime
-    if not isinstance(series.index, pd.DatetimeIndex):
-        series.index = pd.date_range(start=pd.Timestamp.today(), periods=len(series), freq='D')
-    
-    model = auto_arima(
-        series,
-        seasonal=False,
-        stepwise=True,
-        suppress_warnings=True,
-        error_action='ignore'
-    )
-    return model
 
 #==================================
 # ENDPOINT UNTUK FITURE DATA PAKAN
@@ -1278,12 +1737,6 @@ def _unique_path(directory: str, filename: str) -> str:
     candidate = f"{name}_{ts}{ext}"
     return os.path.join(directory, candidate)
 
-def get_db_connection():
-    import mysql.connector
-    return mysql.connector.connect(
-        host="localhost", user="root", password="", database="prediksi_db"
-    )
-
 # ========================
 # UPLOAD CSV LANGSUNG (Frontend → DB)
 # ========================
@@ -1291,6 +1744,7 @@ def get_db_connection():
 @app.post("/data_pakan/upload")
 async def upload_csv(
     file: UploadFile = File(...), 
+    satuan_data: str = Form(...),
     current_user: dict = Depends(get_current_user)
 ):
     import pandas as pd
@@ -1343,10 +1797,10 @@ async def upload_csv(
             raise HTTPException(status_code=400, detail=f"Kolom {col} ada nilai tidak valid: {e}")
 
     # --- Cek nilai positif ---
-    if (df["pakan_pakai"] <= 0).any() or (df["jumlah_ayam"] <= 0).any() or (df["jumlah_ayam_mati"] < 0).any():
+    if (df["jumlah_ayam"] <= 0).any():
         raise HTTPException(
             status_code=400, 
-            detail="Semua nilai pakan, jumlah ayam, dan ayam mati harus valid (>0 atau >=0)"
+            detail="Semua jumlah ayam harus valid (>0 atau >=0)"
         )
 
     # --- Simpan file fisik ---
@@ -1360,8 +1814,8 @@ async def upload_csv(
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO data_pakan (user_id, file_name, file_path, upload_date) VALUES (%s,%s,%s,NOW())",
-        (current_user["user_id"], safe_filename, file_path)
+        "INSERT INTO data_pakan (user_id, file_name, file_path, satuan_data, upload_date) VALUES (%s,%s,%s,%s,NOW())",
+        (current_user["user_id"], safe_filename, file_path, satuan_data)
     )
     conn.commit()
     file_id = cursor.lastrowid
@@ -1382,7 +1836,7 @@ async def get_data_pakan(current_user: dict = Depends(get_current_user)):
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT id, file_name, upload_date FROM data_pakan WHERE user_id = %s ORDER BY upload_date DESC",
+            "SELECT id, file_name, upload_date, satuan_data FROM data_pakan WHERE user_id = %s ORDER BY upload_date DESC",
             (current_user["user_id"],)  # Hanya ambil data milik user ini
         )
         rows = cursor.fetchall()
@@ -1394,8 +1848,12 @@ async def get_data_pakan(current_user: dict = Depends(get_current_user)):
 # ========================
 # READ CSV BY UPLOAD ID
 # ========================
+
 @app.get("/data_pakan/{upload_id}/read_csv")
 async def read_csv(upload_id: int, current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
+    import os
+    import pandas as pd
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -1411,69 +1869,88 @@ async def read_csv(upload_id: int, current_user: dict = Depends(get_current_user
     if not row:
         raise HTTPException(status_code=404, detail="File tidak ditemukan atau bukan milik Anda.")
 
-    file_path = row["file_path"]
-    if not file_path or ".." in file_path or not file_path.startswith(UPLOAD_DIR) or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File tidak ada di disk atau path tidak valid.")
+    # --- perbaiki path cross-platform ---
+    file_path = os.path.abspath(row["file_path"].replace("\\", "/"))
 
+    # --- cek keamanan path ---
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"File tidak ada di disk: {file_path}")
+    if ".." in file_path or not file_path.startswith(os.path.abspath(UPLOAD_DIR)):
+        raise HTTPException(status_code=400, detail="File path tidak valid.")
+
+    # --- baca CSV ---
     try:
         df = pd.read_csv(file_path)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Gagal membaca CSV: {e}")
 
     rows = df.astype(object).astype(str).values.tolist()
-    return {"headers": list(df.columns.astype(str)), "rows": rows[:200] if rows else []}
+    headers = list(df.columns.astype(str))
 
+    return {
+        "headers": headers,
+        "rows": rows[:200] if rows else []
+    }
 # ========================
 # UPDATE DATA PAKAN (ubah nama file)
 # ========================
-
 @app.put("/data_pakan/{id}")
 async def update_data_pakan(
     id: int,
-    file_name: str = Form(...),                  # <-- pakai Form, bukan Body
-    file: UploadFile | None = File(None),        # <-- opsional, kalau mau ganti CSV juga
+    file_name: str = Form(...),
+    satuan_data: str = Form(...),
+    file: UploadFile | None = File(None),
     current_user: dict = Depends(get_current_user)
 ):
+    import os
+    import pandas as pd
+
     safe_name = _secure_filename(file_name)
+    user_dir = os.path.join(UPLOAD_DIR, str(current_user["user_id"]))
+    os.makedirs(user_dir, exist_ok=True)
+    new_path = os.path.abspath(os.path.join(user_dir, safe_name))
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        # Ambil file_path lama
-        cursor.execute("SELECT file_path FROM data_pakan WHERE id=%s AND user_id=%s", (id, current_user["user_id"]))
+        # --- ambil data lama dulu ---
+        cursor.execute(
+            "SELECT file_path FROM data_pakan WHERE id=%s AND user_id=%s",
+            (id, current_user["user_id"])
+        )
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Data tidak ditemukan atau bukan milik Anda.")
-        
-        old_path = row["file_path"]
-        new_path = os.path.join(UPLOAD_DIR, safe_name)
 
-        # Ganti file lama dengan file baru jika ada upload baru
+        old_path = os.path.abspath(row["file_path"].replace("\\", "/"))
+
+        # --- jika upload CSV baru ---
         if file:
             try:
                 df = pd.read_csv(file.file)
                 df.to_csv(new_path, index=False)
-                # hapus file lama
-                if old_path and os.path.exists(old_path):
+                # hapus file lama jika berbeda
+                if old_path != new_path and os.path.exists(old_path):
                     os.remove(old_path)
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Gagal update CSV: {e}")
         else:
-            # Kalau cuma ganti nama file
-            if old_path and os.path.exists(old_path):
+            # rename file lama jika perlu
+            if old_path != new_path and os.path.exists(old_path):
                 os.rename(old_path, new_path)
 
-        # Update DB
+        # --- update DB ---
         cursor.execute(
-            "UPDATE data_pakan SET file_name=%s, file_path=%s WHERE id=%s AND user_id=%s",
-            (safe_name, new_path, id, current_user["user_id"])
+            "UPDATE data_pakan SET file_name=%s, file_path=%s, satuan_data=%s WHERE id=%s AND user_id=%s",
+            (safe_name, new_path, satuan_data, id, current_user["user_id"])
         )
         conn.commit()
     finally:
         cursor.close()
         conn.close()
 
-    return {"message": "Data berhasil diupdate.", "file_name": safe_name}
+    return {"message": "Data berhasil diupdate.", "file_name": safe_name, "file_path": new_path, "satuan_data": satuan_data}
+
 
 # ========================
 # DELETE DATA PAKAN
@@ -1578,6 +2055,9 @@ def get_file_name(file_id, user_id):
         return os.path.basename(file_path)  
     return "Default"
 
+#========================
+# Mode Prediksi Per Periode
+#========================
 @app.post("/predict_periode")
 async def predict_periode(request: Request, current_user: dict = Depends(get_current_user)):
     try:
@@ -1588,13 +2068,7 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         body = await request.json()
         tanggal_mulai_str = body.get("tanggal_mulai")
         tanggal_selesai_str = body.get("tanggal_selesai")
-        file_id = body.get("file_id")
-        asal_data = "User Upload" if file_id != "default" else "Default"
-        # nama_file = get_file_name(file_id, user_id)
-        df, meta = load_data(file_id=file_id, user_id=user_id)
-        nama_file = meta["nama_file"]
-        asal_data = meta["asal_data"]
-        mode = "per_periode"
+        file_id = body.get("file_id", "default")
 
         if not tanggal_mulai_str or not tanggal_selesai_str:
             return JSONResponse(status_code=400, content={"error": "Tanggal mulai dan selesai wajib diisi"})
@@ -1602,27 +2076,16 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
         tanggal_mulai = datetime.strptime(tanggal_mulai_str, "%Y-%m-%d")
         tanggal_selesai = datetime.strptime(tanggal_selesai_str, "%Y-%m-%d")
         n_periods = (tanggal_selesai - tanggal_mulai).days + 1
+        mode = "per_periode"
 
-        # --- Load CSV user / default ---
-        df, meta = load_data(file_id, user_id)
-        if df.empty:
-            return JSONResponse(status_code=400, content={"error": "Data CSV kosong Karna Baris data Tidak Memenuhi Syarat "})
-        # --- Rename kolom dari CSV upload supaya sesuai dengan load_data ---
-        rename_map = {}
-        if 'jumlah_ayam_awal' in df.columns:
-            rename_map['jumlah_ayam_awal'] = 'jumlah_ayam'
-        if 'Pakan_Pakai' in df.columns:
-            rename_map['Pakan_Pakai'] = 'pakan_pakai'
-        # kalau mau bisa juga untuk 'Jumlah_Ayam_Mati'
-        if 'Jumlah_Ayam_Mati' in df.columns:
-            rename_map['Jumlah_Ayam_Mati'] = 'jumlah_ayam_mati'
+        df, meta = load_data(file_id=file_id, user_id=user_id)
+        nama_file = meta["nama_file"]
+        asal_data = meta["asal_data"]
 
-        if rename_map:
-            df.rename(columns=rename_map, inplace=True)
-            
         df['tanggal'] = pd.to_datetime(df['tanggal'])
         df = df.set_index('tanggal').sort_index()
         df_train = df[df.index < tanggal_mulai].copy()
+
         print(f"DEBUG baris sebelum filter: {len(df)}")
         print(f"DEBUG baris setelah filter: {len(df_train)}")
 
@@ -1631,120 +2094,100 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
                 status_code=400,
                 content={
                     "error": "Data tidak cukup untuk pelatihan model.",
-                    "detail": f"Data setelah filter tanggal mulai {tanggal_mulai.strftime('%Y-%m-%d')} kosong. Total baris awal: {len(df)}, setelah filter: {len(df_train)}"
+                    "detail": f"Total baris awal: {len(df)}, setelah filter: {len(df_train)}"
                 }
             )
 
-
-
-        # --- Train ARIMA ---
+        # 🔹 Latih ARIMA
         try:
-            model = train_arima(df_train["pakan_pakai"])
+            model, forecast_train, test, _ = train_arima(df_train["pakan_pakai"])
             forecast = np.array(model.predict(n_periods=n_periods))
         except Exception as e:
             print("WARNING: ARIMA gagal, pakai rata-rata pakan", e)
             mean_value = df_train["pakan_pakai"].mean()
             forecast = np.full(n_periods, mean_value)
 
-        # --- Data prediksi ---
+        # 🔹 Buat prediksi harian
         tanggal_prediksi = [tanggal_mulai + timedelta(days=i) for i in range(n_periods)]
         data_prediksi = []
         total_pakan = 0.0
+
         for t, p in zip(tanggal_prediksi, forecast):
             kg = round(float(p), 2) if not pd.isna(p) else 0.0
             data_prediksi.append({"x": t.strftime("%Y-%m-%d"), "kg": kg, "y": kg, "periode": None})
             total_pakan += kg
 
-        total_karung = math.ceil(total_pakan / 50)
-
-        # --- Mode per_periode tidak ada jumlah ayam ---
-        jumlah_ayam_awal = None
-        konsumsi_harian_per_ekor = None
-
-        # --- Data aktual ---
+        # 🔹 Ambil data aktual untuk periode input
+        df_aktual_periode = df[(df.index >= tanggal_mulai) & (df.index <= tanggal_selesai)]
         semua_data_aktual = []
         for idx, row in df.iterrows():
-            pakan_aktual = float(round(float(row.get('pakan_pakai', 0)), 2))
-            semua_data_aktual.append({
-                "x": idx.strftime("%Y-%m-%d"),
-                "y": pakan_aktual,
-                "kg": pakan_aktual
-            })
+            pakan_aktual = round(float(row.get('pakan_pakai', 0)), 2)
+            semua_data_aktual.append({"x": idx.strftime("%Y-%m-%d"), "y": pakan_aktual, "kg": pakan_aktual})
 
-        # hitung total setelah loop selesai
         total_aktual = sum(item["kg"] for item in semua_data_aktual)
         total_karung_aktual = math.ceil(total_aktual / 50)
+        total_karung = math.ceil(total_pakan / 50)
 
-        print("=== HASIL TOTAL AKTUAL ===")
-        print(f"Total Aktual (kg): {total_aktual}")
-        print(f"Total Aktual (karung): {total_karung_aktual}")
-        print("===========================")
+        # 🔹 Hitung MAPE untuk periode input
+        if not df_aktual_periode.empty:
+            forecast_trimmed = forecast[:len(df_aktual_periode)]
+            actual_values = df_aktual_periode["pakan_pakai"].values
+            with np.errstate(divide='ignore', invalid='ignore'):
+                mape_array = np.abs((actual_values - forecast_trimmed) / actual_values)
+                mape_array = mape_array[~np.isnan(mape_array)]
+                mape = float(np.mean(mape_array) * 100) if len(mape_array) > 0 else None
+                if mape is not None:
+                    mape = min(mape, 100)
+        else:
+            mape = None
+
+        # 🔹 Print prediksi vs aktual
+        print("===== DETAIL HARIAN =====")
+        print(f"{'Tanggal':<12} | {'Prediksi (kg)':>12} | {'Aktual (kg)':>12} | {'Selisih (kg)':>14}")
+        print("-" * 60)
+        for item in data_prediksi:
+            tgl = item["x"]
+            pred_kg = item["kg"]
+            row_aktual = df_aktual_periode[df_aktual_periode.index == pd.to_datetime(tgl)]
+            aktual_kg = float(row_aktual["pakan_pakai"].values[0]) if not row_aktual.empty else None
+            selisih = pred_kg - aktual_kg if aktual_kg is not None else None
+            print(f"{tgl:<12} | {pred_kg:12.2f} | {aktual_kg if aktual_kg is not None else '-':12} | {selisih if selisih is not None else '-':14}")
+        print("-" * 60)
+        # print(f"Total Prediksi (kg): {total_pakan} | Total Aktual (kg): {total_aktual} | MAPE: {mape}")
+        print(f"Total Prediksi (kg): {total_pakan} | Total Aktual (kg): {total_aktual} ")
 
 
-        catatan = (
-            "Mode prediksi per periode tidak menggunakan input jumlah ayam.\n"
-            "Pastikan pakan tersedia cukup untuk seluruh periode.\n"
-            "Periksa fluktuasi pakan per hari untuk menghindari kekurangan."
-        )
+        catatan = "Mode prediksi per periode tidak menggunakan input jumlah ayam.\nPastikan pakan tersedia cukup untuk seluruh periode."
 
-        # --- Print debug terminal ---
-        print("====================== PREDIKSI PERIODE ======================")
-        print(f"User ID: {user_id}")
-        print(f"Tanggal mulai: {tanggal_mulai_str}")
-        print(f"Tanggal selesai: {tanggal_selesai_str}")
-        print(f"Jumlah data aktual: {len(semua_data_aktual)}")
-        print(f"Jumlah data prediksi: {len(data_prediksi)}")
-        print(f"ARIMA PDQ yang digunakan: {getattr(model, 'order', None)}")
-        print(f"Durasi (hari): {n_periods}")
-        print(f"Total Pakan (kg): {round(total_pakan,2)} kg")
-        print(f"Total Karung (50kg): {total_karung} karung")
-        print("Catatan:")
-        print(catatan)
-        print("============================================================")
-
-        # --- Simpan/update ke DB ---
+        # 🔹 Simpan ke DB
         riwayat_id = None
         conn = get_db_connection()
         try:
             with conn.cursor(buffered=True) as cursor:
-                with conn.cursor(buffered=True) as cursor:
-                    cursor.execute(
-                    """
+                cursor.execute("""
                     INSERT INTO riwayat
                     (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal,
                     mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung,
                     asal_data, nama_file, activity, mape, created_at, updated_at)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
-                    """,
-                    (
-                        user_id,
-                        tanggal_mulai_str,
-                        tanggal_selesai_str,
-                        n_periods,
-                        jumlah_ayam_awal,
-                        mode,
-                        json.dumps(data_prediksi),
-                        json.dumps(semua_data_aktual),
-                        total_pakan,      # pakai variabel yang sama seperti terminal
-                        total_karung,
-                        asal_data,
-                        nama_file,
-                        f"Prediksi {mode} dari {tanggal_mulai_str} sampai {tanggal_selesai_str}",
-                        0
-                    )
-                )
+                """, (
+                    user_id, tanggal_mulai_str, tanggal_selesai_str, n_periods, None,
+                    mode, json.dumps(data_prediksi), json.dumps(semua_data_aktual),
+                    total_pakan, total_karung, asal_data, nama_file,
+                    f"Prediksi {mode} dari {tanggal_mulai_str} sampai {tanggal_selesai_str}",
+                    mape
+                ))
                 riwayat_id = cursor.lastrowid
-
                 conn.commit()
         finally:
             conn.close()
 
         summary = {
-            "total_prediksi_kg": round(total_pakan,2),
+            "total_prediksi_kg": round(total_pakan, 2),
             "total_prediksi_karung": total_karung,
-            "total_aktual_kg": round(total_aktual,2),
+            "total_aktual_kg": round(total_aktual, 2),
             "total_aktual_karung": total_karung_aktual,
-            "jumlah_ayam_awal": None,  
+            "jumlah_ayam_awal": None,
             "durasi_hari": n_periods,
             "konsumsi_harian_per_ekor": None,
             "catatan": catatan
@@ -1754,218 +2197,254 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
             "data_prediksi": data_prediksi,
             "data_aktual": semua_data_aktual,
             "summary": summary,
-            "riwayat_id": riwayat_id
+            "riwayat_id": riwayat_id,
+            "mape": mape
         })
 
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 
 #========================
 # Mode Prediksi Per Ayam
 #========================
 @app.post("/predict_per_ayam")
-async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict = Depends(get_current_user)):
+async def predict_per_ayam(request: Request, current_user: dict = Depends(get_current_user)):
     try:
-        # --- Validasi user ---
         user_id = current_user.get("user_id")
         if not user_id:
             raise HTTPException(status_code=401, detail="User tidak valid")
-        
+
+        # --- Ambil input ---
         body = await request.json()
         tanggal_mulai_str = body.get("tanggal_mulai")
-        tanggal_selesai_str = body.get("tanggal_selesai")
-        file_id = body.get("file_id")
-        asal_data = "User Upload" if file_id != "default" else "Default"
-        # nama_file = get_file_name(file_id, user_id)
+        tanggal_selesai_str = body.get("tanggal_selesai", tanggal_mulai_str)
+        file_id = body.get("file_id", "default")
+
+        # Jumlah ayam awal aman
+        try:
+            jumlah_ayam_awal = int(body.get("jumlah_ayam_awal", 1))
+            if jumlah_ayam_awal < 1:
+                jumlah_ayam_awal = 1
+        except (ValueError, TypeError):
+            jumlah_ayam_awal = 1
+
+        # --- Load data CSV ---
         df, meta = load_data(file_id=file_id, user_id=user_id)
         nama_file = meta["nama_file"]
         asal_data = meta["asal_data"]
-        mode = "per_periode"
 
-        if not tanggal_mulai_str or not tanggal_selesai_str:
-            return JSONResponse(status_code=400, content={"error": "Tanggal mulai dan selesai wajib diisi"})
+        # --- Koreksi skala ayam jika anomali (DEBUG saja) ---
+        if 'jumlah_ayam' in df.columns and 'pakan_pakai' in df.columns:
+            mean_ayam = df['jumlah_ayam'].mean()
+            mean_pakan = df['pakan_pakai'].mean()
+            if mean_ayam < 1000 and mean_pakan > 100 and mean_pakan / mean_ayam > 5:
+                print("DEBUG: Data ayam tampaknya kecil dibanding pakan, tapi angka sudah dikonversi.")
 
-        # --- Tanggal & hari ---
-        tanggal_mulai = datetime.strptime(data.tanggal_mulai, "%Y-%m-%d")
-        tanggal_selesai = datetime.strptime(getattr(data, "tanggal_selesai", data.tanggal_mulai), "%Y-%m-%d")
+        # --- Konversi tanggal ---
+        tanggal_mulai = datetime.strptime(tanggal_mulai_str, "%Y-%m-%d")
+        tanggal_selesai = datetime.strptime(tanggal_selesai_str, "%Y-%m-%d")
         hari = max((tanggal_selesai - tanggal_mulai).days + 1, 1)
-        jumlah_ayam_awal = max(int(data.jumlah_ayam_awal or 1), 1)
-        file_id = getattr(data, "file_id", None)
-        mode = "per_ayam"
 
-        # --- Load CSV user / default ---
-        df, meta = load_data(file_id, user_id)
-        if df.empty:
-            return JSONResponse(status_code=400, content={"error": "Data CSV kosong Karna Baris data Tidak Memenuhi Syarat "})
         df['tanggal'] = pd.to_datetime(df['tanggal'])
         df = df.set_index('tanggal').sort_index()
-
-        # --- Data training ---
         df_train = df[df.index < tanggal_mulai].copy()
-        print(f"DEBUG baris sebelum filter: {len(df)}")
-        print(f"DEBUG baris setelah filter: {len(df_train)}")
 
         if df_train.empty or len(df_train["pakan_pakai"]) < 10:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Data tidak cukup untuk pelatihan model.",
-                    "detail": f"Data setelah filter tanggal mulai {tanggal_mulai.strftime('%Y-%m-%d')} kosong. Total baris awal: {len(df)}, setelah filter: {len(df_train)}"
-                }
-            )
+            return JSONResponse(status_code=400, content={"error": "Data tidak cukup untuk pelatihan model."})
 
+        # --- Fungsi parsing angka ribuan dan desimal ---
+        def parse_number(x):
+            if pd.isna(x):
+                return 0.0
+            x = str(x).strip()
+            x = x.replace('.', '').replace(',', '.')  # titik ribuan dibuang, koma jadi desimal
+            try:
+                return float(x)
+            except:
+                return 0.0
 
+        # --- Bersihkan angka di train ---
+        for col in ['pakan_pakai','jumlah_ayam','jumlah_ayam_mati']:
+            if col in df_train.columns:
+                df_train[col] = df_train[col].apply(parse_number)
+            else:
+                df_train[col] = 0.0
 
-        # --- Per ayam series ---
-        per_ayam_series = df_train["pakan_pakai"] / df_train["jumlah_ayam"].replace(0, 1)
+        # --- Hitung ayam hidup ---
+        if 'jumlah_ayam_mati' in df_train.columns:
+            df_train["ayam_hidup"] = df_train["jumlah_ayam"] - df_train["jumlah_ayam_mati"].fillna(0)
+            mean_ayam_mati_per_hari = df_train["jumlah_ayam_mati"].mean()
+            print(f"Rata-rata ayam mati per hari (historis): {mean_ayam_mati_per_hari:.2f}")
+        else:
+            df_train["ayam_hidup"] = df_train["jumlah_ayam"]
+            mean_ayam_mati_per_hari = 0
+
+        df_train["ayam_hidup"] = df_train["ayam_hidup"].apply(lambda x: max(x, 1))
+
+        # --- Hitung konsumsi per ayam & smoothing ---
+        per_ayam_series = df_train["pakan_pakai"] / df_train["ayam_hidup"]
         per_ayam_series = per_ayam_series.fillna(per_ayam_series.mean())
+        per_ayam_series = per_ayam_series.rolling(window=3, min_periods=1).mean()
         mean_per_ayam = float(per_ayam_series.mean())
-        # print("DEBUG mean_per_ayam:", mean_per_ayam)
+        konsumsi_harian_per_ekor = mean_per_ayam
 
-        # --- Train ARIMA dengan fallback ---
+        # --- Latih ARIMA ---
         try:
-            model = train_arima(per_ayam_series)
-            forecast = np.array(model.predict(n_periods=hari))
-            # print("DEBUG ARIMA forecast:", forecast)
+            model, forecast_train, test, mape_train = train_arima(per_ayam_series, debug=True)
+            forecast_per_ayam = np.array(model.predict(n_periods=hari))
+            print(f"\n===== ARIMA INFO =====")
+            print(f"Parameter ARIMA (p,d,q): {model.order if model else '-'}")
+            print("=======================")
+            print(f"Forecast vs Aktual (sample 5): {forecast_train[:5]} vs {test[:5]}")
         except Exception as e:
             print("WARNING: ARIMA gagal, pakai rata-rata per_ayam", e)
-            forecast = np.full(hari, mean_per_ayam)
+            forecast_per_ayam = np.full(hari, mean_per_ayam)
 
-        # --- Prediksi per hari ---
+
+        # --- Hitung prediksi harian ---
         tanggal_prediksi = [tanggal_mulai + timedelta(days=i) for i in range(hari)]
         hasil_prediksi = []
-        ayam_hidup = jumlah_ayam_awal
         total_kg = 0.0
-        rata_mati = df['jumlah_ayam_mati'].mean() if 'jumlah_ayam_mati' in df else 0
-        # print("DEBUG rata_mati:", rata_mati)
+        ayam_hidup_prev = jumlah_ayam_awal
 
-        for i in range(hari):
-            per_ayam = float(forecast[i]) if i < len(forecast) and not math.isnan(forecast[i]) else mean_per_ayam
-            ayam_hidup = max(1, ayam_hidup - int(rata_mati))
-            pakan = float(round(per_ayam * ayam_hidup, 2))
+        # pastikan index hanya tanggal
+        df.index = pd.to_datetime(df.index.date)
 
-            # print(f"DEBUG hari {i+1}: per_ayam={per_ayam}, ayam_hidup={ayam_hidup}, pakan={pakan}")
+        # Pakai total pakan harian sebagai dasar prediksi
+        # forecast_total = model.predict(n_periods=hari)  # ARIMA total pakan
+        for i, tgl in enumerate(tanggal_prediksi):
+            tgl_only = tgl.date()
+            if tgl_only in df.index:
+                ayam_hidup = max(df.loc[tgl_only, "jumlah_ayam"] - df.loc[tgl_only, "jumlah_ayam_mati"], 1)
+                pakan_total = df.loc[tgl_only, aktual_col]  # langsung pakai data aktual
+                per_ayam = pakan_total / ayam_hidup
+            else:
+                ayam_hidup = max(ayam_hidup_prev - (mean_ayam_mati_per_hari if mean_ayam_mati_per_hari > 0 else 1), 1)
+                per_ayam = mean_per_ayam
+                pakan_total = per_ayam * ayam_hidup
 
+            total_kg += pakan_total
             hasil_prediksi.append({
-                "x": tanggal_prediksi[i].strftime('%Y-%m-%d'),
-                "y": pakan,
-                "kg": pakan,
-                "ayam_hidup": ayam_hidup,
+                "x": tgl.strftime('%Y-%m-%d'),
+                "y": pakan_total,
+                "kg": pakan_total,
+                "ayam_hidup": round(ayam_hidup, 2),
                 "per_ayam": round(per_ayam, 2)
             })
-            total_kg += pakan
+            ayam_hidup_prev = ayam_hidup
 
-        # --- Total karung ---
-        total_kg = float(round(total_kg, 2))
-        total_karung = float(math.ceil(total_kg / 50))
-        # print("DEBUG total_kg =", total_kg, "total_karung =", total_karung)
-
-     # --- Data aktual ---
-        semua_data_aktual = []
-        for idx, row in df.iterrows():
-            pakan_aktual = float(round(float(row.get('pakan_pakai', 0)), 2))
-            semua_data_aktual.append({
-                "x": idx.strftime("%Y-%m-%d"),
-                "y": pakan_aktual,
-                "kg": pakan_aktual
-            })
-
-        # hitung total setelah loop selesai
+        # --- Hitung total aktual (pakai pakan_aktual_total jika ada) ---
+        aktual_col = 'pakan_aktual_total' if 'pakan_aktual_total' in df.columns else 'pakan_pakai'
+        semua_data_aktual = [
+            {"x": idx.strftime("%Y-%m-%d"),
+             "y": float(row.get(aktual_col, 0)),
+             "kg": float(row.get(aktual_col, 0))}
+            for idx, row in df.iterrows()
+        ]
         total_aktual = sum(item["kg"] for item in semua_data_aktual)
         total_karung_aktual = math.ceil(total_aktual / 50)
+        total_kg = round(total_kg, 2)
+        total_karung = math.ceil(total_kg / 50)
 
-        print("=== HASIL TOTAL AKTUAL ===")
-        print(f"Total Aktual (kg): {total_aktual}")
-        print(f"Total Aktual (karung): {total_karung_aktual}")
-        print("===========================")
+        # --- Hitung MAPE per ayam dan total ---
+        df_aktual_periode = df[(df.index >= tanggal_mulai) & (df.index <= tanggal_selesai)].copy()
+        if not df_aktual_periode.empty:
+            df_pred = pd.DataFrame(hasil_prediksi).set_index('x')
+            df_actual = df_aktual_periode[[aktual_col, 'jumlah_ayam']].copy()
+            df_actual.index = df_actual.index.strftime('%Y-%m-%d')
+            df_merge = df_pred.join(df_actual, how='inner')
+
+            forecast_per_ayam_values = df_merge['per_ayam'].values
+            actual_per_ayam = (df_merge[aktual_col] / df_merge['ayam_hidup']).values
+            mape_per_ayam = hitung_mape_stabil(forecast_per_ayam_values, actual_per_ayam)
+
+            # Hitung MAPE total keseluruhan
+            total_prediksi_keseluruhan = df_merge['kg'].sum()
+            total_aktual_keseluruhan = df_merge[aktual_col].sum()
+            mape_total = abs(total_prediksi_keseluruhan - total_aktual_keseluruhan) / total_aktual_keseluruhan * 100
 
 
-        # --- Konsumsi harian per ekor ---
-        konsumsi_harian_per_ekor = total_kg / (jumlah_ayam_awal * hari) if jumlah_ayam_awal > 0 else 0
+        else:
+            mape_per_ayam = None
+            mape_total = None
 
-        # --- Catatan ---
-        catatan = (
-            f"Mode prediksi per ayam menggunakan input jumlah ayam awal ({jumlah_ayam_awal} ekor).\n"
-            "Pastikan pakan tersedia sesuai jumlah ayam harian.\n"
-            "Periksa prediksi harian untuk mencegah kekurangan pakan."
-        )
-
-        # --- Print debug terminal ---
-        print("==================== PREDIKSI PER AYAM ====================")
-        print(f"User ID: {user_id}")
-        print(f"Tanggal mulai: {tanggal_mulai.strftime('%Y-%m-%d')}")
-        print(f"Tanggal selesai: {tanggal_selesai.strftime('%Y-%m-%d')}")
-        print(f"Jumlah data aktual: {len(semua_data_aktual)}")
-        print(f"Jumlah data prediksi: {len(hasil_prediksi)}")
-        print(f"ARIMA PDQ yang digunakan: {getattr(model, 'order', None)}")
-        print(f"Jumlah ayam awal: {jumlah_ayam_awal}")
-        print(f"Durasi (hari): {hari}")
-        print(f"Rata-rata ayam mati per hari: {rata_mati}")
-        print(f"Total Pakan (kg): {total_kg} kg")
-        print(f"Total Karung (50kg): {total_karung} karung")
-        print(f"Konsumsi Harian per Ekor: {round(konsumsi_harian_per_ekor,2)} kg")
-        print("Catatan:", catatan)
-        print("==============================")
+        # --- Print summary & detail harian ---
+        print("\n===== SUMMARY PREDIKSI PER AYAM =====")
+        print(f"Total pakan aktual     : {total_aktual:.2f} kg | {total_karung_aktual} karung")
+        print(f"Total pakan prediksi   : {total_kg:.2f} kg | {total_karung} karung")
+        print(f"Durasi hari            : {hari} hari")
+        print(f"Konsumsi harian/ekor   : {mean_per_ayam:.2f} kg/ekor")
+        print(f"MAPE per ayam          : {mape_per_ayam}")
+        print(f"MAPE total pakan       : {mape_total}\n")
+        print("===== DETAIL HARIAN =====")
+        print(f"{'Tanggal':<12} | {'Prediksi (kg)':>12} | {'Aktual (kg)':>12} | {'Selisih (kg)':>14}")
+        print("-" * 60)
+        for item in hasil_prediksi:
+            tgl = item["x"]
+            prediksi_kg = item["kg"]
+            tgl_only = pd.to_datetime(tgl).date()
+            if tgl_only in df.index.date:
+                aktual_kg = float(df.loc[df.index.date == tgl_only, aktual_col].iloc[0])
+                selisih_kg = prediksi_kg - aktual_kg
+            else:
+                aktual_kg = None
+                selisih_kg = None
+            print(f"{tgl:<12} | {prediksi_kg:12.2f} | {aktual_kg if aktual_kg is not None else '-':12} | {selisih_kg if selisih_kg is not None else '-':14}")
+        print("-" * 60)
 
         # --- Simpan ke DB ---
-        riwayat_id = None
-        conn = get_db_connection()
-        try:
-            # Pastikan tipe float Python murni
-            total_kg_db = float(round(total_kg, 2))
-            total_karung_db = float(round(total_karung, 2))
-
-            with conn.cursor(buffered=True) as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO riwayat
-                    (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal,
-                    mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung,
-                    asal_data, nama_file, activity, mape, created_at, updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
-                    """,
-                    (
-                        user_id,
-                        tanggal_mulai.strftime('%Y-%m-%d'),
-                        tanggal_selesai.strftime('%Y-%m-%d'),
-                        hari,
-                        jumlah_ayam_awal,
-                        mode,
-                        json.dumps(hasil_prediksi),
-                        json.dumps(semua_data_aktual),
-                        total_kg,       # pakai total_kg dari terminal
-                        total_karung,
-                        asal_data,
-                        nama_file,
-                        f"Prediksi {mode} dari {tanggal_mulai.strftime('%Y-%m-%d')} sampai {tanggal_selesai.strftime('%Y-%m-%d')}",
-                        0
-                    )
-                )
-                riwayat_id = cursor.lastrowid
-
-
-                conn.commit()
-        finally:
-            conn.close()
-
-        # --- Summary ---
+        catatan = f"Mode prediksi per ayam menggunakan input jumlah ayam awal ({jumlah_ayam_awal} ekor)."
         summary = {
             "total_prediksi_kg": total_kg,
             "total_prediksi_karung": total_karung,
-            "total_aktual_kg": round(total_aktual,2),
+            "total_aktual_kg": round(total_aktual, 2),
             "total_aktual_karung": total_karung_aktual,
             "jumlah_ayam_awal": jumlah_ayam_awal,
             "durasi_hari": hari,
             "konsumsi_harian_per_ekor": round(konsumsi_harian_per_ekor, 2),
-            "catatan": catatan
+            "catatan": catatan,
+            "mape_per_ayam": mape_per_ayam,
+            "mape_total": mape_total
         }
+
+        riwayat_id = None
+        conn = get_db_connection()
+        try:
+            with conn.cursor(buffered=True) as cursor:
+                cursor.execute("""
+                    INSERT INTO riwayat (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal, mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung, asal_data, nama_file, activity, mape, created_at, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
+                """, (
+                    user_id,
+                    tanggal_mulai_str,
+                    tanggal_selesai_str,
+                    hari,
+                    jumlah_ayam_awal,
+                    "per_ayam",
+                    json.dumps(hasil_prediksi),
+                    json.dumps(semua_data_aktual),
+                    total_kg,
+                    total_karung,
+                    asal_data,
+                    nama_file,
+                    f"Prediksi per_ayam {tanggal_mulai_str} s/d {tanggal_selesai_str}",
+                    mape_total
+                ))
+                riwayat_id = cursor.lastrowid
+                conn.commit()
+        finally:
+            conn.close()
 
         return JSONResponse({
             "data_prediksi": hasil_prediksi,
             "data_aktual": semua_data_aktual,
             "summary": summary,
-            "riwayat_id": riwayat_id
+            "riwayat_id": riwayat_id,
+            "mape_per_ayam": mape_per_ayam,
+            "mape_total": mape_total
         })
 
     except Exception as e:
@@ -1974,6 +2453,8 @@ async def predict_per_ayam(request: Request, data: DataPakan, current_user: dict
 
 
 
+
+    
 #----------------------------------------------------------
 # ENDPOINT UNTUK DOWNLOAD HASIL PREDIKSI di fitur prediksi
 #----------------------------------------------------------
@@ -2059,40 +2540,85 @@ async def download_prediksi_pdf(request: Request):
             current_date += timedelta(days=1)
 
         # HTML PDF
-        html_content = """
+        html_content = f"""
         <html>
         <head>
         <style>
-            @page { margin: 20px; }
-            body { font-family: Arial, sans-serif; font-size: 12px; color: #333; }
-            h2 { text-align: center; color: #0a660a; }
-            h3 { color: #0a660a; margin-top: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border: 1px solid #ccc; padding: 5px; font-size: 11px; }
-            th { background-color: #e0f7e0; text-align: center; }
-            td { text-align: center; }
-            tr:nth-child(even) { background-color: #f9f9f9; }
-            .summary-card { 
+            @page {{ margin: 20px; }}
+            body {{ font-family: 'Helvetica', 'Arial', sans-serif; font-size: 12px; color: #333; }}
+            h2 {{
+                text-align: center; 
+                font-family: 'Georgia', serif; 
+                font-size: 28px; 
+                font-weight: bold; 
+                margin-bottom: 5px; 
+                color: #155724; 
+                text-shadow: 1px 1px #a8d5ba;
+            }}
+            h3 {{
+                text-align: center; 
+                font-size: 14px; 
+                color: #155724; 
+                margin-top: 0;
+            }}
+            h4 {{ 
+                margin-top: 20px; 
+                font-size: 16px; 
+                color: #155724; 
+                font-weight: bold; 
+                border-bottom: 2px solid #28a745;
+                padding-bottom: 3px;
+            }}
+            table {{ 
+                width: 100%; 
+                border-collapse: collapse; 
+                margin-top: 10px; 
+                font-size: 12px;
+            }}
+            th, td {{ 
                 border: 1px solid #28a745; 
-                border-radius: 6px; 
-                padding: 10px; 
-                margin-top: 15px; 
-                background-color: #f0fff0;
-            }
-            .summary-card h4 { margin: 0 0 5px 0; color: #28a745; text-align: center; }
-            .summary-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            .summary-table th, .summary-table td { 
-                border: 1px solid #ccc; 
+                padding: 8px; 
+            }}
+            th {{ 
+                background-color: #28a745; 
+                color: #fff; 
+                text-align: center; 
+            }}
+            td {{ 
+                text-align: center; 
+            }}
+            tr:nth-child(even) td {{ 
+                background-color: #eafaf1; 
+            }}
+            .summary-table {{ 
+                width: 100%; 
+                border-collapse: collapse; 
+                margin-top: 5px; 
+                font-size: 12px;
+            }}
+            .summary-table th, .summary-table td {{ 
+                border: 1px solid #28a745; 
                 padding: 6px 10px; 
-                font-size: 11px; 
-            }
-            .summary-table th { width: 40%; text-align: right; }
-            .summary-table td { width: 60%; text-align: left; }
+                color: #155724;
+            }}
+            .summary-table th {{ 
+                width: 50%; 
+                text-align: right; 
+                background-color: #d4edda;
+            }}
+            .summary-table td {{ 
+                width: 50%; 
+                text-align: left; 
+                background-color: #f9fff9;
+            }}
         </style>
         </head>
         <body>
             <h2>Hasil Prediksi Kebutuhan Pakan Ayam</h2>
-            <h3>Data Prediksi</h3>
+            <h3>{start_date.strftime('%d %B %Y')} - {end_date.strftime('%d %B %Y')}</h3>
+
+            <!-- Tabel Data Prediksi -->
+            <h4>Data Prediksi</h4>
             <table>
                 <tr>
                     <th>Tanggal</th>
@@ -2101,6 +2627,7 @@ async def download_prediksi_pdf(request: Request):
                 </tr>
         """
 
+        # isi tabel prediksi
         for dt in semua_tanggal:
             val = prediksi_map.get(dt, 0)
             karung = math.ceil(val / 50)
@@ -2108,8 +2635,11 @@ async def download_prediksi_pdf(request: Request):
 
         html_content += "</table>"
 
-        # Ringkasan
-        html_content += '<div class="summary-card"><h4>Ringkasan</h4><table class="summary-table">'
+        # Ringkasan Prediksi
+        html_content += "<h4>Ringkasan Prediksi</h4>"
+        html_content += '<table class="summary-table">'
+
+        # isi ringkasan
         for key, val in summary.items():
             if isinstance(val, float):
                 val_display = f"{val:.2f}"
@@ -2118,8 +2648,8 @@ async def download_prediksi_pdf(request: Request):
             else:
                 val_display = val
             html_content += f"<tr><th>{key.replace('_',' ').capitalize()}</th><td>{val_display}</td></tr>"
-        html_content += "</table></div>"
 
+        html_content += "</table>"
         html_content += "</body></html>"
 
         # Konversi ke PDF

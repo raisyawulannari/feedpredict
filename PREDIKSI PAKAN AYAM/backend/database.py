@@ -51,12 +51,14 @@ def init_db() -> None:
             email VARCHAR(100) NOT NULL UNIQUE,
             password VARCHAR(255) NOT NULL,
             role ENUM('admin','user') NOT NULL DEFAULT 'user',
+            is_verified BOOLEAN DEFAULT FALSE,
+            google_id VARCHAR(100) NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         );
         """)
 
-        # Tabel riwayat dengan kolom jumlah_ayam_awal
+        # Tabel riwayat
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS riwayat (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -73,14 +75,16 @@ def init_db() -> None:
             mape FLOAT NULL,
             asal_data VARCHAR(50) NULL,
             nama_file VARCHAR(50) NULL,
+            satuan VARCHAR(10) DEFAULT 'kg',
             activity VARCHAR(255) NULL, -- log aktivitas
+            is_active BOOLEAN DEFAULT FALSE, -- kolom untuk notif
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- waktu dibuat
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-
         );
         """)
+
         
         # Tabel data_pakan untuk simpan file CSV user
         cursor.execute("""
@@ -89,6 +93,7 @@ def init_db() -> None:
             user_id INT NOT NULL,
             file_name VARCHAR(50) NOT NULL,
             file_path VARCHAR(100) NOT NULL,
+            satuan_data ENUM('kg','karung') DEFAULT 'kg',
             upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

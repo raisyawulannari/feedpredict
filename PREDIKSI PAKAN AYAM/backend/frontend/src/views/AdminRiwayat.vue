@@ -143,18 +143,22 @@ const paginatedRiwayat = computed(() => {
 })
 
 // Pagination methods
-const nextPage = () => {
-  if (currentPage.value < totalPages.value) currentPage.value++
-}
-const prevPage = () => {
-  if (currentPage.value > 1) currentPage.value--
-}
+const nextPage = () => { if (currentPage.value < totalPages.value) currentPage.value++ }
+const prevPage = () => { if (currentPage.value > 1) currentPage.value-- }
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+* {
+  font-family: 'Poppins', sans-serif;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 .admin-riwayat {
   padding: 1.5rem;
-  font-family: "Poppins", sans-serif;
   background-color: #f0faf0;
 }
 
@@ -172,7 +176,7 @@ h1 {
 
 p {
   margin-bottom: 0.8rem;
-  color: #3e8a0b;
+  color: #1b4d1b;
 }
 
 .search-wrapper {
@@ -197,28 +201,26 @@ p {
 .table-wrapper {
   border-radius: 12px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.08);
-  background-color: #1a3d19;
+  background-color: #fff;
   margin-top: 1rem;
-  overflow-x: unset;
+  overflow-x: auto;
 }
 
 .riwayat-table {
   width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
+  border-collapse: collapse;
 }
 
 .riwayat-table th,
 .riwayat-table td {
   padding: 10px 12px;
   text-align: center;
-  white-space: nowrap;
   font-size: 0.9rem;
+  color: #1b4d1b;
 }
 
 .riwayat-table thead {
-  background-color: #a3d9a3;
-  color: #1b4d1b;
+  background-color: #dcedc8; /* header hijau muda */
   text-transform: uppercase;
   font-weight: 600;
 }
@@ -237,7 +239,7 @@ p {
 
 /* Highlight baris search */
 .highlight {
-  background-color: #e6c7c7 !important; 
+  background-color: #ffe0b2 !important; 
 }
 
 .aksi-col {
@@ -255,24 +257,24 @@ p {
 }
 
 .btn-detail {
-  background-color: #1b4d1b;
+  background-color: #2e7d32;
   color: #fff;
   text-decoration: none;
 }
 
 .btn-detail:hover {
-  background-color: #3e8a0b;
+  background-color: #81c784;
 }
 
 .btn-delete {
-  background-color: #dc3545;
+  background-color: #d32f2f;
   color: #fff;
   border: none;
   cursor: pointer;
 }
 
 .btn-delete:hover {
-  background-color: #ff6b6b;
+  background-color: #f06292;
 }
 
 .badge {
@@ -284,11 +286,11 @@ p {
 }
 
 .badge-green {
-  background-color: #28a745;
+  background-color: #4caf50;
 }
 
 .badge-blue {
-  background-color: #007bff;
+  background-color: #2196f3;
 }
 
 .pagination-wrapper {
@@ -304,7 +306,7 @@ p {
   border-radius: 6px;
   border: none;
   cursor: pointer;
-  background-color: #1b4d1b;
+  background-color: #2e7d32;
   color: white;
   transition: all 0.2s;
 }

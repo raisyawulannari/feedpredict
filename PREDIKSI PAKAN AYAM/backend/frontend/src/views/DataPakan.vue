@@ -17,6 +17,7 @@
             <tr>
               <th>Nama File</th>
               <th>Tanggal Upload</th>
+              <th>Satuan</th>
               <th>Aksi</th>
             </tr>
           </thead>
@@ -28,7 +29,14 @@
               <td>{{ file.file_name }}</td>
               <td>{{ file.upload_date }}</td>
               <td>
+                <select v-model="file.satuan_data" @change="updateSatuan(file)">
+                  <option value="kg">kg</option>
+                  <option value="karung">karung</option>
+                </select>
+              </td>
+              <td>
                 <button class="btn-update" @click="editFile(file)">Update</button>
+                <span style="display:inline-block;width:0.5rem;"></span>
                 <button class="btn-delete" @click="deleteFile(file)">Hapus</button>
               </td>
             </tr>
@@ -58,6 +66,10 @@
       </div>
 
       <div class="preview-actions">
+        <select v-model="selectedSatuan" class="satuan-select">
+          <option value="kg">kg</option>
+          <option value="karung">karung</option>
+        </select>
         <button class="btn-save" @click="savePreview">✅ Simpan</button>
         <button class="btn-cancel" @click="cancelPreview">❌ Batal</button>
       </div>
@@ -79,6 +91,7 @@ export default {
     const editingFile = ref(null);
     const templateUrl = ref("/static/template/template_data_pakan.csv");
     const fileInput = ref(null);
+    const selectedSatuan = ref("kg");
 
     const getAuthHeaders = () => ({
       Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
@@ -94,24 +107,21 @@ export default {
     };
 
     const fetchUploadedFiles = async () => {
-  try { 
-    const res = await fetch("http://localhost:8000/data_pakan/list", {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
+      try {
+        const res = await fetch("http://localhost:8000/data_pakan/list", {
+          headers: getAuthHeaders(),
+        });
+
+        if (res.status === 401) return handleUnauthorized();
+
+        const data = await res.json();
+        uploadedFiles.value = Array.isArray(data) ? data : [];
+      } catch (err) {
+        uploadedFiles.value = [];
+        Swal.fire("Error", "Gagal ambil data dari server", "error");
+        console.error(err);
       }
-    });
-
-    if (res.status === 401) return handleUnauthorized();
-
-    const data = await res.json();
-    uploadedFiles.value = Array.isArray(data) ? data : [];
-  } catch (err) {
-    uploadedFiles.value = [];
-    Swal.fire("Error", "Gagal ambil data dari server", "error");
-    console.error(err);
-  }
-};
-
+    };
 
     const handleFileUpload = (event) => {
       const file = event.target.files[0];
@@ -161,81 +171,79 @@ export default {
     };
 
     const savePreview = async () => {
-  if (!previewData.value.length) return;
+      if (!previewData.value.length) return;
+      const formData = new FormData();
 
-  const formData = new FormData();
+      const csvBlob = new Blob(
+        [Papa.unparse({ fields: previewHeaders.value, data: previewData.value })],
+        { type: "text/csv" }
+      );
 
-  if (editingFile.value) {
-    // Kalau update file lama / nama file
-    formData.append("file_name", editingFile.value.file_name); // selalu string
-    if (selectedFile.value) {
-      formData.append("file", selectedFile.value); // optional, file baru
-    }
+      if (editingFile.value) {
+        formData.append("file_name", editingFile.value.file_name);
+        formData.append("file", csvBlob, editingFile.value.file_name);
+        formData.append("satuan_data", selectedSatuan.value);
 
-    try {
-      const res = await fetch(`http://localhost:8000/data_pakan/${editingFile.value.id}`, {
-        method: "PUT",
-        body: formData,
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token") || ""}`
-          // jangan set Content-Type, biarkan browser atur otomatis
+        try {
+          const res = await fetch(
+            `http://localhost:8000/data_pakan/${editingFile.value.id}`,
+            {
+              method: "PUT",
+              body: formData,
+              headers: getAuthHeaders(),
+            }
+          );
+
+          const result = await res.json();
+          if (res.ok && result.message) {
+            Swal.fire("Berhasil", result.message, "success");
+            fetchUploadedFiles();
+            cancelPreview();
+          } else {
+            Swal.fire("Gagal", result.detail || JSON.stringify(result), "error");
+          }
+        } catch (err) {
+          console.error(err);
+          Swal.fire("Error", err.message || "Unknown error", "error");
         }
-      });
-
-      const result = await res.json();
-
-      if (res.ok && result.message) {
-        Swal.fire("Berhasil", result.message, "success");
-        fetchUploadedFiles();
-        cancelPreview();
       } else {
-        Swal.fire("Gagal", result.detail || JSON.stringify(result), "error");
-      }
-    } catch (err) {
-      console.error(err);
-      Swal.fire("Error", err.message || "Unknown error", "error");
-    }
+        // Upload baru
+        formData.append("file", csvBlob, selectedFile.value.name);
+        formData.append("satuan_data", selectedSatuan.value);
 
-  } else {
-    // Upload file baru
-    if (!selectedFile.value) return Swal.fire("Gagal", "Tidak ada file untuk diupload", "error");
+        try {
+          const res = await fetch("http://localhost:8000/data_pakan/upload", {
+            method: "POST",
+            body: formData,
+            headers: getAuthHeaders(),
+          });
 
-    formData.append("file", selectedFile.value);
-
-    try {
-      const res = await fetch("http://localhost:8000/data_pakan/upload", {
-        method: "POST",
-        body: formData,
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token") || ""}`
+          const result = await res.json();
+          if (res.ok && result.message) {
+            Swal.fire("Berhasil", result.message, "success");
+            fetchUploadedFiles();
+            cancelPreview();
+          } else {
+            Swal.fire("Gagal", result.detail || JSON.stringify(result), "error");
+          }
+        } catch (err) {
+          console.error(err);
+          Swal.fire("Error", err.message || "Unknown error", "error");
         }
-      });
-      const result = await res.json();
-
-      if (res.ok && result.message) {
-        Swal.fire("Berhasil", result.message, "success");
-        fetchUploadedFiles();
-        cancelPreview();
-      } else {
-        Swal.fire("Gagal", result.detail || JSON.stringify(result), "error");
       }
-    } catch (err) {
-      console.error(err);
-      Swal.fire("Error", err.message || "Unknown error", "error");
-    }
-  }
-};
-
+    };
 
     const cancelPreview = () => {
       previewData.value = [];
       previewHeaders.value = [];
       selectedFile.value = null;
       editingFile.value = null;
+      selectedSatuan.value = "kg";
     };
 
     const editFile = async (file) => {
       editingFile.value = file;
+      selectedSatuan.value = file.satuan_data || "kg";
       try {
         const res = await fetch(`http://localhost:8000/data_pakan/${file.id}/read_csv`, {
           headers: getAuthHeaders(),
@@ -244,7 +252,6 @@ export default {
         const data = await res.json();
         previewHeaders.value = data.headers; 
         previewData.value = data.rows;
-
       } catch (err) {
         Swal.fire("Error", "Gagal baca file CSV", "error");
         console.error(err);
@@ -279,6 +286,31 @@ export default {
       }
     };
 
+    // --- Tambahan: Update satuan per file ---
+    const updateSatuan = async (file) => {
+      try {
+        const formData = new FormData();
+        formData.append("file_name", file.file_name);
+        formData.append("satuan_data", file.satuan_data);
+
+        const res = await fetch(`http://localhost:8000/data_pakan/${file.id}`, {
+          method: "PUT",
+          body: formData,
+          headers: getAuthHeaders(),
+        });
+
+        const result = await res.json();
+        if (res.ok) {
+          Swal.fire("Berhasil", "Satuan file diperbarui", "success");
+        } else {
+          Swal.fire("Gagal", result.detail || JSON.stringify(result), "error");
+        }
+      } catch (err) {
+        console.error(err);
+        Swal.fire("Error", "Gagal update satuan", "error");
+      }
+    };
+
     onMounted(fetchUploadedFiles);
 
     return {
@@ -289,61 +321,51 @@ export default {
       editingFile,
       templateUrl,
       fileInput,
+      selectedSatuan,
       handleFileUpload,
       savePreview,
       cancelPreview,
       editFile,
       deleteFile,
+      updateSatuan,
     };
   },
 };
 </script>
 
 <style scoped>
-/* Status file */
-.status-exists {
-  color: green;
-  font-weight: bold;
-}
-
-.status-missing {
-  color: red;
-  font-weight: bold;
-}
-
 .data-pakan-container {
   width: 100%;
-  padding: 20px;
+  padding: 1.25rem;
   background: #f9fdf9;
+  box-sizing: border-box;
 }
 
 .card {
   background: white;
-  padding: 20px;
-  border-radius: 12px;
-  margin-bottom: 30px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  margin-bottom: 1.875rem;
+  box-shadow: 0 0.1875rem 0.625rem rgba(0, 0, 0, 0.1);
+  box-sizing: border-box;
 }
 
 .table-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.upload-card .table-header {
   flex-wrap: wrap;
-  gap: 10px;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.625rem;
+  margin-bottom: 0.625rem;
 }
 
 .btn-upload {
   background: #388e3c;
   color: white;
-  padding: 6px 14px;
-  font-size: 14px;
+  padding: 0.375rem 0.875rem;
+  font-size: 0.875rem;
   border: none;
-  border-radius: 6px;
+  border-radius: 0.375rem;
   cursor: pointer;
 }
 
@@ -355,52 +377,67 @@ export default {
   color: #0a660a;
   font-weight: bold;
   text-decoration: underline;
+  font-size: 0.875rem;
+}
+
+.satuan-select {
+  padding: 0.375rem;
+  border-radius: 0.375rem;
+  border: 1px solid #ccc;
+  font-size: 0.875rem;
 }
 
 .table-wrapper {
   overflow-x: auto;
+  width: 100%;
 }
 
 .custom-table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
-  margin-top: 10px;
+  margin-top: 0.625rem;
   background: white;
+  table-layout: auto;
 }
 
-.custom-table th {
-  background: #388e3c;
-  color: white;
-  padding: 12px;
-  text-align: center;
-}
-
+.custom-table th,
 .custom-table td {
-  padding: 12px;
+  padding: 0.75rem;
   border: 1px solid #ddd;
   text-align: center;
+  font-size: 0.875rem;
+  word-break: break-word;
 }
 
 .cell-input {
   width: 100%;
+  box-sizing: border-box;
   border: 1px solid #ccc;
-  padding: 6px;
-  border-radius: 6px;
+  padding: 0.375rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
 }
 
 .preview-actions {
-  margin-top: 15px;
+  margin-top: 0.9375rem;
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: center;
+}
+
+.btn-save, .btn-cancel {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
 }
 
 .btn-save {
   background: #43a047;
   color: white;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
 }
 
 .btn-save:hover {
@@ -410,57 +447,23 @@ export default {
 .btn-cancel {
   background: #e53935;
   color: white;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
 }
 
 .btn-cancel:hover {
   background: #b71c1c;
 }
 
-.empty-message {
-  text-align: center;
-  color: #888;
-  padding: 15px;
-}
-
-.btn-update,
-.btn-delete,
-.btn-download {
-  margin: 0 5px;
-  padding: 6px 14px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.btn-update {
-  background: #fbc02d;
-  color: white;
-}
-
-.btn-update:hover {
-  background: #f9a825;
-}
-
-.btn-delete {
-  background: #e53935;
-  color: white;
-}
-
-.btn-delete:hover {
-  background: #c62828;
-}
-
-.btn-download {
-  background: #0a660a;
-  color: white;
-  text-decoration: none;
-}
-
-.btn-download:hover {
-  background: #043d01;
+/* Responsive untuk layar kecil */
+@media (max-width: 768px) {
+  .table-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .btn-upload,
+  .download-link,
+  .satuan-select {
+    width: 100%;
+    text-align: center;
+  }
 }
 </style>

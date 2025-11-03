@@ -95,8 +95,18 @@ onMounted(() => {
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+* {
+  font-family: 'Poppins', sans-serif;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
 .admin-data-pakan {
   padding: 1.5rem;
+  background-color: #f9f9f9;
 }
 
 h2 {
@@ -114,11 +124,16 @@ h2 {
   border: 1px solid #a5d6a7;
   border-radius: 5px;
   outline: none;
+  transition: all 0.2s;
+}
+.search-input:focus {
+  border-color: #2e7d32;
+  box-shadow: 0 0 5px rgba(46,125,50,0.3);
 }
 
 /* Card & Table */
 .card {
-  background: #e8f5e9; /* hijau muda */
+  background: #fff;
   border-radius: 8px;
   padding: 1rem;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -136,15 +151,17 @@ h2 {
   padding: 0.5rem 0.8rem;
   text-align: left;
   font-size: 0.9rem;
+  color: #1b1b1b;
 }
 
 .data-table th {
-  background: #4caf50;
+  background: #2e7d32;
   color: white;
+  text-transform: uppercase;
 }
 
 .data-table tr:nth-child(even) {
-  background: #c8e6c9;
+  background: #f1fdf1;
 }
 
 .text-center {
@@ -163,5 +180,24 @@ h2 {
 }
 .btn-delete:hover {
   background: #b71c1c;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .search-input {
+    width: 100%;
+    margin-bottom: 0.5rem;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  .btn-delete {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+  }
 }
 </style>

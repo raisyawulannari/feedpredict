@@ -20,6 +20,7 @@
           <th>Nama File</th>
           <th>Created At</th>
           <th>Aksi</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>
@@ -49,6 +50,10 @@
               <button @click="hapusItem(item.id)" class="btn-hapus-item">Hapus</button>
             </div>
           </td>
+          <td class="text-center">
+            <span v-if="item.is_active" class="aktif-label">Aktif</span>
+            <button v-else @click="setActive(item.id)" class="btn-aktifkan">Aktifkan</button>
+          </td>
         </tr>
       </tbody>
     </table>
@@ -58,7 +63,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import axios from 'axios'
+import axios from '@/plugins/axios.js'
 
 const riwayat = ref([])
 
@@ -67,19 +72,14 @@ onMounted(() => {
 })
 
 async function loadRiwayat() {
-  try {
-    const token = localStorage.getItem('token')
-    // if (!token) { window.location.href = '/login'; return }
-    if (!token) {
-    riwayat.value = [] // kosongkan tapi tetap di halaman
+  const token = localStorage.getItem('token')
+  if (!token) {
+    riwayat.value = []
     return
   }
-    
 
-    const res = await axios.get('http://127.0.0.1:8000/riwayat', {
-      headers: { Authorization: `Bearer ${token.trim()}` }
-    })
-
+  try {
+    const res = await axios.get('/riwayat')
     riwayat.value = (res.data.riwayat || []).map(item => {
       let prediksiArray = []
       let aktualArray = []
@@ -107,11 +107,42 @@ async function loadRiwayat() {
 
   } catch (error) {
     console.error('Gagal mengambil data:', error.response?.data || error)
-    // if (error.response?.status === 401) { window.location.href = '/login' }
-     if (error.response?.status === 401) {
-      // user belum login, kosongkan tapi tetap di halaman
-      riwayat.value = []
-     }
+    if (error.response?.status === 401) {
+      riwayat.value = [] // token expired, kosongkan data tapi tetap di halaman
+    }
+  }
+}
+
+
+async function setActive(id) {
+  try {
+    await axios.put(`/riwayat/${id}/set_active`)
+    await loadRiwayat()
+  } catch (error) {
+    console.error(error)
+    alert("Gagal mengaktifkan riwayat.")
+  }
+}
+
+async function hapusItem(id) {
+  if (!confirm('Yakin ingin menghapus data ini?')) return;
+  try {
+    await axios.delete(`/riwayat/${id}`)
+    await loadRiwayat()
+  } catch (error) {
+    console.error(error)
+    alert("Gagal menghapus riwayat.")
+  }
+}
+
+async function hapusSemua() {
+  if (!confirm('Yakin ingin menghapus semua data riwayat?')) return;
+  try {
+    await axios.delete('/riwayat')
+    await loadRiwayat()
+  } catch (error) {
+    console.error(error)
+    alert("Gagal menghapus semua riwayat.")
   }
 }
 
@@ -126,21 +157,8 @@ function formatAngka(value) { return value == null ? '-' : value.toLocaleString(
 function formatPersen(value) { return value == null ? '-' : value.toFixed(2) + '%' }
 function mapeClass(mape) { return mape < 10 ? 'mape-baik' : mape < 20 ? 'mape-cukup' : 'mape-buruk' }
 function formatAsalData(value) { return value === 'User Upload' ? 'Upload' : 'Default' }
-
-async function hapusItem(id) {
-  if (!confirm('Yakin ingin menghapus data ini?')) return;
-  const token = localStorage.getItem('token'); if (!token) { window.location.href = '/login'; return; }
-  try { await axios.delete(`http://127.0.0.1:8000/riwayat/${id}`, { headers: { Authorization: `Bearer ${token.trim()}` } }); await loadRiwayat() }
-  catch (error) { console.error(error.response?.data || error); alert("Gagal menghapus riwayat."); }
-}
-
-async function hapusSemua() {
-  if (!confirm('Yakin ingin menghapus semua data riwayat?')) return;
-  const token = localStorage.getItem('token'); if (!token) { window.location.href = '/login'; return; }
-  try { await axios.delete('http://127.0.0.1:8000/riwayat', { headers: { Authorization: `Bearer ${token.trim()}` } }); await loadRiwayat() }
-  catch (error) { console.error(error.response?.data || error); alert("Gagal menghapus semua riwayat."); }
-}
 </script>
+
 
 <style scoped>
 .container {
@@ -219,16 +237,31 @@ async function hapusSemua() {
 
 .mape-baik {
   color: green;
-  font-weight: bold;
 }
 
 .mape-cukup {
-  color: orange;
-  font-weight: bold;
+  color: black;
 }
 
 .mape-buruk {
-  color: red;
+  color: black;
+}
+
+.btn-aktifkan {
+  background-color: #2a9d8f;
+  color: white;
+  padding: 0.3rem 0.6rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-aktifkan:hover {
+  opacity: 0.9;
+}
+
+.aktif-label {
+  color: green;
   font-weight: bold;
 }
 </style>

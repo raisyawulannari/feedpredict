@@ -3,32 +3,26 @@
     <div class="login-card">
       <h2 class="title">Login</h2>
 
+      <!-- Google Login Button -->
+      <button class="btn-google" @click="loginWithGoogle">
+        <img src="@/assets/google-logo.png" alt="Google Logo" class="google-logo" />
+        Login with Google
+      </button>
+
+      <p class="or-text">atau</p>
+
       <form class="login-form" @submit.prevent="loginUser">
         <!-- Email -->
         <div class="input-wrapper">
-          <input
-            type="email"
-            placeholder="Email"
-            v-model="email"
-            class="input-field"
-            required
-          />
+          <input type="email" placeholder="Email" v-model="email" class="input-field" required />
         </div>
 
         <!-- Password -->
         <div class="input-wrapper">
-          <input
-            :type="showPassword ? 'text' : 'password'"
-            placeholder="Password"
-            v-model="password"
-            class="input-field"
-            required
-          />
-          <i
-            :class="['fa', showPassword ? 'fa-eye-slash' : 'fa-eye']"
-            class="toggle-password"
-            @click="togglePassword"
-          ></i>
+          <input :type="showPassword ? 'text' : 'password'" placeholder="Password" v-model="password"
+            class="input-field" required />
+          <i :class="['fa', showPassword ? 'fa-eye-slash' : 'fa-eye']" class="toggle-password"
+            @click="togglePassword"></i>
         </div>
 
         <!-- Options -->
@@ -40,7 +34,7 @@
           <router-link to="/forgot" class="forgot-link">Forgot Password?</router-link>
         </div>
 
-        <!-- Button -->
+        <!-- Login Button -->
         <button type="submit" class="btn-login">Login</button>
       </form>
 
@@ -82,13 +76,16 @@ export default {
     togglePassword() {
       this.showPassword = !this.showPassword;
     },
+
     async loginUser() {
+      this.errorMessage = "";
       try {
         const res = await axios.post("http://127.0.0.1:8000/api/login", {
           email: this.email,
           password: this.password,
         });
 
+        // simpan token & role
         localStorage.setItem("token", res.data.access_token);
         localStorage.setItem("role", res.data.role);
         localStorage.setItem("name", res.data.name);
@@ -99,18 +96,64 @@ export default {
           token: res.data.access_token,
         });
 
+        // redirect berdasarkan role
         if (res.data.role === "admin") this.$router.push("/admin/dashboard");
         else this.$router.push("/user/dashboard");
       } catch (err) {
-        this.errorMessage = err.response?.data?.detail || "Login gagal";
+        // tangani error verifikasi
+        if (err.response?.status === 403) {
+          this.errorMessage = "Akun belum diverifikasi oleh admin";
+        } else {
+          this.errorMessage = err.response?.data?.detail || "Login gagal";
+        }
       }
+    },
+
+    loginWithGoogle() {
+      if (!window.google) {
+        this.errorMessage = "Google API belum siap, reload halaman";
+        return;
+      }
+
+      const client_id = "YOUR_GOOGLE_CLIENT_ID"; // ganti dengan milikmu
+      const googleAuth = window.google.accounts.oauth2.initTokenClient({
+        client_id,
+        scope: "email profile",
+        callback: async (response) => {
+          try {
+            const res = await axios.post("http://127.0.0.1:8000/api/login-google", {
+              id_token: response.access_token,
+            });
+
+            localStorage.setItem("token", res.data.access_token);
+            localStorage.setItem("role", res.data.role);
+            localStorage.setItem("name", res.data.name);
+
+            userStore.setUser({
+              name: res.data.name,
+              role: res.data.role,
+              token: res.data.access_token,
+            });
+
+            if (res.data.role === "admin") this.$router.push("/admin/dashboard");
+            else this.$router.push("/user/dashboard");
+          } catch (err) {
+            if (err.response?.status === 403) {
+              this.errorMessage = "Akun belum diverifikasi oleh admin";
+            } else {
+              this.errorMessage = err.response?.data?.detail || "Login Google gagal";
+            }
+          }
+        },
+      });
+
+      googleAuth.requestAccessToken();
     },
   },
 };
 </script>
 
 <style scoped>
-/* Container dengan background peternakan ayam */
 .login-container {
   position: relative;
   display: flex;
@@ -131,7 +174,6 @@ export default {
   background: rgba(0, 0, 0, 0.45);
 }
 
-/* Card transparan dengan efek blur */
 .login-card {
   position: relative;
   z-index: 1;
@@ -142,111 +184,143 @@ export default {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   width: 360px;
   text-align: center;
-  color: #f5f5f5;
+  color: #b0f2b6;
 }
 
-/* Judul login */
 .title {
   font-size: 30px;
-  color: #ffd369;
+  color: #3e8a0b;
+  text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.995);
   margin-bottom: 25px;
   font-weight: 600;
 }
 
-/* Form */
+.btn-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #ffffff;
+  color: #000;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: bold;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 15px;
+  position: relative;
+  z-index: 2;
+}
+
+.google-logo {
+  width: 22px;
+  height: 22px;
+}
+
+.or-text {
+  text-align: center;
+  margin: 10px 0 20px;
+  color: #b0f2b6;
+  font-weight: 500;
+}
+
 .login-form {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  width: 100%; /* form full mengikuti card */
+  width: 100%;
 }
 
-/* Wrapper supaya input & password sama lebar */
 .input-wrapper {
   position: relative;
   width: 100%;
 }
 
-/* Input field */
 .input-field {
   width: 100%;
-  padding: 14px 40px 14px 14px; /* space kanan buat icon mata */
+  padding: 14px 40px 14px 14px;
   border-radius: 8px;
   border: none;
   outline: none;
   font-size: 15px;
   background: rgba(255, 255, 255, 0.85);
-  color: #222;
+  color: #065f00;
   transition: box-shadow 0.3s ease;
   box-sizing: border-box;
 }
+
 .input-field:focus {
-  box-shadow: 0 0 8px rgba(255, 211, 105, 0.7);
+  box-shadow: 0 0 8px rgba(62, 138, 11, 0.7);
 }
 
-/* Password toggle icon */
 .toggle-password {
   position: absolute;
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
   cursor: pointer;
-  color: #555;
+  color: #065f00;
   font-size: 16px;
 }
 
-/* Options */
+.toggle-password:hover {
+  color: #3e8a0b;
+}
+
 .options {
   display: flex;
   justify-content: space-between;
   font-size: 14px;
-  color: #f0f0f0;
+  color: #b0f2b6;
   width: 100%;
 }
 
 .forgot-link {
-  color: #ffd369;
+  color: #b0f2b6;
   text-decoration: none;
 }
+
 .forgot-link:hover {
+  color: #065f00;
   text-decoration: underline;
 }
 
-/* Button */
 .btn-login {
   padding: 14px;
   border-radius: 8px;
-  background-color: #763007;
-  color: #fff;
+  background-color: #3e8a0b;
+  color: #ffffff;
   font-weight: bold;
   border: none;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 18px;
   transition: background-color 0.3s ease;
 }
-.btn-login:hover {
-  background-color: #ffd369;
-  color: #222;
-}
 
-/* Register link */
-.register-text {
-  margin-top: 18px;
-  font-size: 14px;
-  color: #f0f0f0;
-}
-.register-link {
-  color: #ffd369;
-  font-weight: 500;
-  text-decoration: underline;
-}
-.register-link:hover {
+.btn-login:hover {
+  background-color: #65a832;
   color: #ffffff;
 }
 
-/* Error */
+.register-text {
+  margin-top: 18px;
+  font-size: 14px;
+  color: #b0f2b6;
+}
+
+.register-link {
+  color: #3e8a0b;
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.register-link:hover {
+  color: #065f00;
+}
+
 .error-message {
-  color: #ff6b6b;
+  color: #ff7f50;
   margin-top: 12px;
   font-size: 13px;
 }

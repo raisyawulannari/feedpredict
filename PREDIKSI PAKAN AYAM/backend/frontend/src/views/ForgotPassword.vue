@@ -85,14 +85,12 @@ export default {
       this.showConfirmPassword = !this.showConfirmPassword;
     },
     async resetPassword() {
-      // validasi password
       if (this.password !== this.confirmPassword) {
         this.errorMessage = "Password baru dan konfirmasi tidak sama!";
         return;
       }
 
       try {
-        // sesuaikan dengan backend (butuh `email` dan `new_password`)
         await axios.post("http://127.0.0.1:8000/api/reset-password", {
           email: this.email,
           new_password: this.password,
@@ -123,10 +121,7 @@ export default {
 .login-container::before {
   content: "";
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0, 0, 0, 0.45);
 }
 
@@ -140,13 +135,13 @@ export default {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   width: 360px;
   text-align: center;
-  color: #f5f5f5;
+  color: #b0f2b6; /* hijau lembut */
 }
 
 .title {
   font-size: 28px;
-  color: #ffd369;
-  margin-bottom: 20px;
+  color: #3e8a0b; /* hijau utama */
+ text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.995);  margin-bottom: 20px;
   font-weight: 600;
 }
 
@@ -170,12 +165,12 @@ export default {
   outline: none;
   font-size: 15px;
   background: rgba(255, 255, 255, 0.85);
-  color: #222;
+  color: #065f00; /* teks hijau gelap */
   transition: box-shadow 0.3s ease;
   box-sizing: border-box;
 }
 .input-field:focus {
-  box-shadow: 0 0 8px rgba(255, 211, 105, 0.7);
+  box-shadow: 0 0 8px rgba(62, 138, 11, 0.7); /* highlight hijau */
 }
 
 .toggle-password {
@@ -184,15 +179,18 @@ export default {
   top: 50%;
   transform: translateY(-50%);
   cursor: pointer;
-  color: #555;
+  color: #065f00; /* hijau gelap */
   font-size: 16px;
+}
+.toggle-password:hover {
+  color: #3e8a0b; /* hijau utama */
 }
 
 .btn-login {
   padding: 14px;
   border-radius: 8px;
-  background-color: #763007;
-  color: #fff;
+  background-color: #3e8a0b; /* hijau utama */
+  color: #ffffff; /* teks putih */
   font-weight: bold;
   border: none;
   cursor: pointer;
@@ -200,26 +198,26 @@ export default {
   transition: background-color 0.3s ease;
 }
 .btn-login:hover {
-  background-color: #ffd369;
-  color: #222;
+  background-color: #65a832; /* hijau terang */
+  color: #ffffff;
 }
 
 .register-text {
   margin-top: 18px;
   font-size: 14px;
-  color: #f0f0f0;
+  color: #b0f2b6; /* hijau lembut */
 }
 .register-link {
-  color: #ffd369;
+  color: #3e8a0b; /* hijau utama */
   font-weight: 500;
   text-decoration: underline;
 }
 .register-link:hover {
-  color: #ffffff;
+  color: #065f00; /* hijau gelap */
 }
 
 .error-message {
-  color: #ff6b6b;
+  color: #065f00; /* hijau gelap */
   margin-top: 12px;
   font-size: 13px;
 }

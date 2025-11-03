@@ -100,20 +100,21 @@ onMounted(fetchUsers)
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
 .kelola-user-container {
-  padding: 2rem;
-  background: #f0faf0;
+  padding: 0rem;
+  background: #f9f9f9;
   min-height: 100vh;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Poppins', sans-serif;
 }
 
 .title {
   font-size: 2rem;
   font-weight: 700;
   margin-bottom: 1.5rem;
-  color: #1b4d1b;
+  color: #2e7d32; /* hijau */
   text-align: center;
-  text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
 }
 
 .table-wrapper {
@@ -134,10 +135,11 @@ onMounted(fetchUsers)
   text-align: left;
   border-bottom: 1px solid #e6f0e6;
   font-size: 14px;
+  color: #1b1b1b;
 }
 
 .user-table th {
-  background: #c8e6c9;
+  background: #c8e6c9; /* hijau muda */
   color: #1b4d1b;
   font-weight: 600;
 }
@@ -154,7 +156,6 @@ onMounted(fetchUsers)
   background: #f8fff8;
   transition: all 0.2s;
 }
-
 .role-select:focus {
   border-color: #1b4d1b;
   box-shadow: 0 0 5px rgba(27,77,27,0.3);
@@ -172,7 +173,6 @@ onMounted(fetchUsers)
   transition: all 0.2s;
   margin-right: 5px;
 }
-
 .btn-save:hover {
   background: linear-gradient(45deg, #2e7d32, #1b4d1b);
 }
@@ -187,7 +187,6 @@ onMounted(fetchUsers)
   font-weight: 600;
   transition: all 0.2s;
 }
-
 .btn-delete:hover {
   background-color: #c9302c;
 }
@@ -206,6 +205,7 @@ onMounted(fetchUsers)
   text-align: center;
 }
 
+/* Responsive */
 @media (max-width: 768px) {
   .user-table th, .user-table td {
     padding: 10px 12px;

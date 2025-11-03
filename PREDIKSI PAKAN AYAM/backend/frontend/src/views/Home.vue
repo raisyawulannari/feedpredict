@@ -19,8 +19,8 @@
         </p>
         <ul>
           <li>✔️ Efisiensi Pakan</li>
-          <li>✔️ Prediksi Terpecaya</li>
-          <li>✔️ Data Harian Otomatis</li>
+          <li>✔️ Prediksi Pakan Ayam Berdasarkan Data Historis</li>
+          <li>✔️ Prediksi Pakan untuk Masa Mendatang</li>
         </ul>
       </div>
       <div class="about-image">
@@ -139,10 +139,10 @@ onMounted(() => {
 }
 
 .about-image img {
-  width: 80%;
+  width: 90%;
   max-width: 400px;
   height: auto;
-  border-radius: 12px;
+  border-radius: 10px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
 

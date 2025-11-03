@@ -118,14 +118,15 @@ const chartOptions = {
           let kg = 0
 
           if (dataset.label === 'Pakan Aktual') {
-            // Data aktual dari CSV = karung, konversi ke kg
-            karung = rawVal
-            kg = karung * 50
+            // Data aktual dari CSV = kg
+            kg = rawVal
+            karung = Math.ceil(kg / 50)
           } else {
             // Data prediksi = kg, konversi ke karung
             kg = rawVal
             karung = Math.ceil(kg / 50)
           }
+
 
           const kgFormatted = kg.toFixed(2).replace('.', ',')
           const karungFormatted = karung.toLocaleString('id-ID')

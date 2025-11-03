@@ -55,10 +55,10 @@
 
 
       <div class="form-group full-width">
-  <button @click="getPrediksi" class="btn" :disabled="isSaving || isLoading">
-    {{ isLoading ? "Memproses..." : "Tampilkan Prediksi" }}
-  </button>
-</div>
+        <button @click="getPrediksi" class="btn" :disabled="isSaving || isLoading">
+          {{ isLoading ? "Memproses..." : "Tampilkan Prediksi" }}
+        </button>
+      </div>
 
 
     </div>
@@ -77,14 +77,14 @@
       <template v-if="summary && summary.total_prediksi_kg">
         <table class="summary-table">
           <tbody>
-            <tr>
+            <!-- <tr>
               <th>Rata-rata Error (MAPE)</th>
               <td>
                 <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mape }}%</span>
                 ➜ Akurasi:
                 <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mapeInterpretasi }}</span>
               </td>
-            </tr>
+            </tr> -->
             <tr>
               <th>Total Pakan</th>
               <td>{{ Math.round(summary.total_prediksi_kg).toLocaleString('id-ID') }} kg</td>
@@ -198,6 +198,7 @@ export default {
     mape() {
       return this.summary?.mape?.toFixed(2) ?? "0.00";
     },
+    
     mapeInterpretasi() {
       const nilai = parseFloat(this.mape);
       if (nilai < 10) return "Sangat Baik";
@@ -208,9 +209,9 @@ export default {
     mapeWarna() {
       const nilai = parseFloat(this.mape);
       if (nilai < 10) return "green";
-      else if (nilai < 20) return "limegreen";
-      else if (nilai < 50) return "orange";
-      return "red";
+      else if (nilai < 20) return "black";
+      else if (nilai < 50) return "black";
+      return "black";
     },
   },
 
@@ -276,14 +277,15 @@ export default {
         const actualMap = {};
         aktual.forEach(a => {
           const date = a.x.split("T")[0];
-          actualMap[date] = a.kg ?? a.y ?? 0;  // pastikan ada fallback
+          actualMap[date] = a.kg ?? a.y ?? 0; // PASTIKAN kg, jangan karung
         });
 
         const predictedMap = {};
         prediksi.forEach(p => {
           const date = p.x.split("T")[0];
-          predictedMap[date] = p.y ?? 0;
+          predictedMap[date] = p.y ?? 0; // PASTIKAN y adalah kg
         });
+
 
         // --- Chart Data ---
         this.labels = semuaTanggal;
@@ -296,12 +298,15 @@ export default {
         // --- Detail prediksi untuk tabel CSV/PDF ---
         this.predictedDetail = semuaTanggal.map(date => {
           const pred = prediksi.find(p => p.x.split("T")[0] === date);
+          const kg = pred?.y ?? 0;
           return {
             date,
-            value: pred?.y ?? 0,
-            karung: Math.ceil((pred?.y ?? 0) / 50)
+            kg,                    // pakai kg langsung
+            karung: Math.ceil(kg / 50)
           };
         });
+
+
 
 
         // --- Periode edges (highlight per minggu) ---
@@ -328,123 +333,118 @@ export default {
     },
 
     async getPrediksi(simpan = true) {
-  // --- Validasi input ---
-  if (!this.tanggal_mulai || !this.tanggal_selesai) {
-    return Swal.fire("Tanggal belum lengkap", "Mohon isi tanggal mulai dan selesai", "warning");
-  }
+      if (!this.tanggal_mulai || !this.tanggal_selesai) {
+        return Swal.fire("Tanggal belum lengkap", "Mohon isi tanggal mulai dan selesai", "warning");
+      }
 
-  if (this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
-    return Swal.fire("Jumlah ayam wajib diisi", "Minimal 1 ayam", "warning");
-  }
+      if (this.mode === "per_ayam" && (!this.jumlah_ayam_awal || this.jumlah_ayam_awal < 1)) {
+        return Swal.fire("Jumlah ayam wajib diisi", "Minimal 1 ayam", "warning");
+      }
 
-  if (new Date(this.tanggal_selesai) < new Date(this.tanggal_mulai)) {
-    return Swal.fire("Tanggal salah", "Tanggal selesai tidak boleh sebelum tanggal mulai", "warning");
-  }
+      if (new Date(this.tanggal_selesai) < new Date(this.tanggal_mulai)) {
+        return Swal.fire("Tanggal salah", "Tanggal selesai tidak boleh sebelum tanggal mulai", "warning");
+      }
 
-  this.isLoading = true;
+      this.isLoading = true;
 
-  try {
-    // --- Tentukan endpoint ---
-    const endpoint = this.mode === "per_ayam" ? "/predict_per_ayam" : "/predict_periode";
+      try {
+        const endpoint = this.mode === "per_ayam" ? "/predict_per_ayam" : "/predict_periode";
+        const payload = {
+          tanggal_mulai: this.tanggal_mulai,
+          tanggal_selesai: this.tanggal_selesai,
+          file_id: this.file_id || "default",
+        };
+        if (this.mode === "per_ayam") payload.jumlah_ayam_awal = this.jumlah_ayam_awal || 1;
+        console.log("▶️ Kirim ke endpoint:", endpoint, payload);
+        const res = await api.post(endpoint, payload);
+        console.log("✅ Respon API:", res.data);
 
-    // --- Payload ---
-    const payload = {
-      tanggal_mulai: this.tanggal_mulai,
-      tanggal_selesai: this.tanggal_selesai,
-      file_id: this.file_id || "default",
-    };
-    if (this.mode === "per_ayam") payload.jumlah_ayam_awal = this.jumlah_ayam_awal || 1;
+        // --- Ambil data prediksi & aktual ---
+        const prediksi = res.data.data_prediksi || [];
+        const aktual = res.data.data_aktual || [];
+        const apiSummary = res.data.summary || {};
 
-    console.log("▶️ Kirim ke endpoint:", endpoint, payload);
+        // --- Semua tanggal unik ---
+        const semuaTanggal = Array.from(
+          new Set([...aktual.map(a => a.x.split("T")[0]), ...prediksi.map(p => p.x.split("T")[0])])
+        ).sort();
 
-    // --- Panggil API ---
-    const res = await api.post(endpoint, payload);
-    console.log("✅ Respon API:", res.data);
+        // --- Mapping data untuk chart ---
+        const actualMap = Object.fromEntries(
+          aktual.map(a => [a.x.split("T")[0], a.kg ?? a.y ?? 0])
+        );
+        const predictedMap = Object.fromEntries(
+          prediksi.map(p => [p.x.split("T")[0], p.y ?? 0])
+        );
 
-    // --- Ambil data prediksi & aktual ---
-    const prediksi = res.data.data_prediksi || [];
-    const aktual = res.data.data_aktual || [];
-    const apiSummary = res.data.summary || {};
+        this.labels = semuaTanggal;
+        this.chartData = {
+          aktual: semuaTanggal.map(d => actualMap[d] ?? null),
+          prediksi: semuaTanggal.map(d => predictedMap[d] ?? null)
+        };
 
-    // --- Semua tanggal unik ---
-    const semuaTanggal = Array.from(
-      new Set([...aktual.map(a => a.x.split("T")[0]), ...prediksi.map(p => p.x.split("T")[0])])
-    ).sort();
+        // --- Detail prediksi untuk CSV/PDF ---
+        this.predictedDetail = semuaTanggal.map(date => {
+          const pred = prediksi.find(p => p.x.split("T")[0] === date);
+          return {
+            date,
+            value: pred?.y ?? 0,
+            karung: Math.ceil((pred?.y ?? 0) / 50)
+          };
+        });
 
-    // --- Mapping data untuk chart ---
-    const actualMap = Object.fromEntries(
-      aktual.map(a => [a.x.split("T")[0], a.kg ?? a.y ?? 0])
-    );
-    const predictedMap = Object.fromEntries(
-      prediksi.map(p => [p.x.split("T")[0], p.y ?? 0])
-    );
+        // --- Periode edges (highlight per minggu) ---
+        const periodeEdges = [];
+        for (let i = 0; i < semuaTanggal.length; i += 7) {
+          periodeEdges.push(i);
+          periodeEdges.push(Math.min(i + 6, semuaTanggal.length - 1));
+        }
+        this.periodeEdges = periodeEdges;
 
-    this.labels = semuaTanggal;
-    this.chartData = {
-      aktual: semuaTanggal.map(d => actualMap[d] ?? null),
-      prediksi: semuaTanggal.map(d => predictedMap[d] ?? null)
-    };
+        // --- Summary disesuaikan per mode ---
+        this.summary = {
+  ...apiSummary,
+  mape: apiSummary.mape, // 🔥 ini wajib dibawa biar kebaca di computed
+  jumlah_ayam_awal: this.mode === 'per_ayam' ? apiSummary.jumlah_ayam_awal : undefined,
+  perkiraan_akhir_ayam: this.mode === 'per_ayam' ? apiSummary.perkiraan_akhir_ayam : undefined,
+  rata_per_ayam_kg_per_hari: this.mode === 'per_ayam' ? apiSummary.konsumsi_harian_per_ekor : undefined,
+  prediksi_jumlah_ayam: this.mode === 'per_periode' ? apiSummary.prediksi_jumlah_ayam : undefined,
+  catatan: apiSummary.catatan || ""
+};
 
-    // --- Detail prediksi untuk CSV/PDF ---
-    this.predictedDetail = semuaTanggal.map(date => {
-      const pred = prediksi.find(p => p.x.split("T")[0] === date);
-      return {
-        date,
-        value: pred?.y ?? 0,
-        karung: Math.ceil((pred?.y ?? 0) / 50)
-      };
-    });
 
-    // --- Periode edges (highlight per minggu) ---
-    const periodeEdges = [];
-    for (let i = 0; i < semuaTanggal.length; i += 7) {
-      periodeEdges.push(i);
-      periodeEdges.push(Math.min(i + 6, semuaTanggal.length - 1));
-    }
-    this.periodeEdges = periodeEdges;
+        // --- Simpan riwayat ke backend jika valid ---
+        if (simpan && this.summary?.total_prediksi_kg && !this.alreadySaved) {
+          await this.$nextTick();
+          this.alreadySaved = true;
+          await this.simpanRiwayatBackend();
+        }
 
-    // --- Summary disesuaikan per mode ---
-    this.summary = {
-      ...apiSummary,
-      jumlah_ayam_awal: this.mode === 'per_ayam' ? apiSummary.jumlah_ayam_awal : undefined,
-      perkiraan_akhir_ayam: this.mode === 'per_ayam' ? apiSummary.perkiraan_akhir_ayam : undefined,
-      rata_per_ayam_kg_per_hari: this.mode === 'per_ayam' ? apiSummary.konsumsi_harian_per_ekor : undefined,
-      prediksi_jumlah_ayam: this.mode === 'per_periode' ? apiSummary.prediksi_jumlah_ayam : undefined,
-      catatan: apiSummary.catatan || ""
-    };
+      } catch (err) {
+        // --- Error handling lebih jelas ---
+        let msg = "Gagal memuat prediksi";
+        if (err.response) {
+          msg = err.response.data?.detail || err.response.data?.message || JSON.stringify(err.response.data);
+          console.error("❌ Error backend:", err.response.data);
+        } else {
+          console.error("❌ Error frontend / network:", err);
+        }
+        Swal.fire("Error", msg, "error");
 
-    // --- Simpan riwayat ke backend jika valid ---
-    if (simpan && this.summary?.total_prediksi_kg && !this.alreadySaved) {
-      await this.$nextTick();
-      this.alreadySaved = true;
-      await this.simpanRiwayatBackend();
-    }
-
-  } catch (err) {
-    // --- Error handling lebih jelas ---
-    let msg = "Gagal memuat prediksi";
-    if (err.response) {
-      msg = err.response.data?.detail || err.response.data?.message || JSON.stringify(err.response.data);
-      console.error("❌ Error backend:", err.response.data);
-    } else {
-      console.error("❌ Error frontend / network:", err);
-    }
-    Swal.fire("Error", msg, "error");
-
-  } finally {
-    this.isLoading = false;
-  }
-},
+      } finally {
+        this.isLoading = false;
+      }
+    },
 
 
     async simpanRiwayatBackend() {
       console.log("▶️ simpanRiwayatBackend terpanggil");
 
       if (this.isSaving || this.alreadySaved) {
-    console.log("❌ Riwayat sudah disimpan, skip insert");
-    return; // skip kalau sudah disimpan
-  }
-      if (this.isSaving) return; 
+        console.log("❌ Riwayat sudah disimpan, skip insert");
+        return; // skip kalau sudah disimpan
+      }
+      if (this.isSaving) return;
       this.isSaving = true;
 
       try {
@@ -488,15 +488,16 @@ export default {
         console.error("Gagal simpan riwayat:", err);
       }
       finally {
-    this.isSaving = false;
+        this.isSaving = false;
       }
     },
 
 
     downloadCSV() {
-      const rows = this.predictedDetail.map(d => [d.date, d.value, d.karung]);
+      const rows = this.predictedDetail.map(d => [d.date, d.kg, d.karung]);
       let csvContent = "data:text/csv;charset=utf-8,Date,Prediksi (kg),Karung (50kg)\n";
       rows.forEach(r => { csvContent += r.join(",") + "\n"; });
+
       const link = document.createElement("a");
       link.setAttribute("href", encodeURI(csvContent));
       link.setAttribute("download", "prediksi.csv");

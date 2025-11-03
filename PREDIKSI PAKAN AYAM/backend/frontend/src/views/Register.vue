@@ -16,7 +16,7 @@
           v-model="email" 
           type="email"
           placeholder="Email" 
-          required 
+          required
           class="input-field"
         />
 
@@ -39,6 +39,8 @@
 
       <p class="error-message" v-if="errorMessage">{{ errorMessage }}</p>
 
+      <p class="info-message" v-if="infoMessage">{{ infoMessage }}</p>
+
       <p class="login-text">
         Sudah punya akun? 
         <router-link to="/login" class="login-link">Login</router-link>
@@ -57,6 +59,7 @@ export default {
       email: '',
       password: '',
       errorMessage: '',
+      infoMessage: '',
       showPassword: false
     }
   },
@@ -65,14 +68,20 @@ export default {
       this.showPassword = !this.showPassword
     },
     async registerUser() {
+      this.errorMessage = ''
+      this.infoMessage = ''
       try {
         await axios.post('http://127.0.0.1:8000/api/register', {
           name: this.name,
           email: this.email,
           password: this.password
         })
-        alert("Registrasi sukses, silakan login")
-        this.$router.push('/login')
+        // Inform user bahwa harus diverifikasi admin
+        this.infoMessage = "Registrasi sukses! Akun Anda akan diverifikasi oleh admin sebelum bisa login."
+        // Reset form
+        this.name = ''
+        this.email = ''
+        this.password = ''
       } catch (err) {
         this.errorMessage = err.response?.data?.detail || 'Registrasi gagal'
       }
@@ -82,7 +91,6 @@ export default {
 </script>
 
 <style scoped>
-/* Sama dengan login-container */
 .register-container {
   position: relative;
   display: flex;
@@ -100,7 +108,6 @@ export default {
   background: rgba(0, 0, 0, 0.45);
 }
 
-/* Card transparan dengan efek blur */
 .register-card {
   position: relative;
   z-index: 1;
@@ -111,25 +118,23 @@ export default {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   width: 360px;
   text-align: center;
-  color: #f5f5f5;
+  color: #b0f2b6;
 }
 
-/* Judul register */
 .title {
   font-size: 30px;
-  color: #ffd369; 
+  color: #3e8a0b;
+  text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.995);
   margin-bottom: 25px;
   font-weight: 600;
 }
 
-/* Form input */
 .register-form {
   display: flex;
   flex-direction: column;
   gap: 18px;
 }
 
-/* Input */
 .input-field {
   width: 100%;
   padding: 14px 16px;
@@ -138,21 +143,20 @@ export default {
   outline: none;
   font-size: 15px;
   background: rgba(255, 255, 255, 0.85);
-  color: #222;
+  color: #065f00;
   transition: box-shadow 0.3s ease;
   box-sizing: border-box;
 }
 .input-field:focus {
-  box-shadow: 0 0 8px rgba(255, 211, 105, 0.7);
+  box-shadow: 0 0 8px rgba(62, 138, 11, 0.7);
 }
 
-/* Password wrapper */
 .password-wrapper {
   position: relative;
   width: 100%;
 }
 .password-input {
-  padding-right: 40px; /* tambahan padding biar sama lebar dgn input lain */
+  padding-right: 40px;
 }
 .toggle-password {
   position: absolute;
@@ -160,19 +164,18 @@ export default {
   top: 50%;
   transform: translateY(-50%);
   cursor: pointer;
-  color: #555;
+  color: #065f00;
   font-size: 16px;
 }
 .toggle-password:hover {
-  color: #fff;
+  color: #3e8a0b;
 }
 
-/* Button */
 .btn-register {
   padding: 14px;
   border-radius: 8px;
-  background-color: #763007; /* sama dengan login */
-  color: #fff;
+  background-color: #3e8a0b;
+  color: #ffffff;
   font-weight: bold;
   border: none;
   cursor: pointer;
@@ -180,29 +183,34 @@ export default {
   transition: background-color 0.3s ease;
 }
 .btn-register:hover {
-  background-color: #ffd369;
-  color: #222;
+  background-color: #65a832;
+  color: #ffffff;
 }
 
-/* Teks login */
 .login-text {
   margin-top: 18px;
   font-size: 14px;
-  color: #f0f0f0;
+  color: #b0f2b6;
 }
 .login-link {
-  color: #ffd369;
+  color: #3e8a0b;
   font-weight: 500;
   text-decoration: underline;
 }
 .login-link:hover {
-  color: #ffffff;
+  color: #065f00;
 }
 
-/* Error */
 .error-message {
-  color: #ff6b6b;
+  color: #ff7f50;
   margin-top: 12px;
   font-size: 13px;
+}
+
+.info-message {
+  color: #b0f2b6;
+  margin-top: 12px;
+  font-size: 13px;
+  font-style: italic;
 }
 </style>
