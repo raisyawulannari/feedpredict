@@ -579,6 +579,9 @@ def get_admin_riwayat_detail(id: int, user=Depends(get_current_user)):
                     mapes.append(abs(p["kg"] - aktual_dict[p["x"]]) / aktual_dict[p["x"]])
             if mapes:
                 mape = round(sum(mapes) / len(mapes) * 100, 2)
+                
+        # ✅ Tambahkan baris ini agar mape_harian dikenali
+        mape_harian = float(row.get("mape_harian") or 0)
 
         # Tentukan mode prediksi
         mode_prediksi = row.get("mode_prediksi", "per_ayam")  # pastikan ada field mode_prediksi di table
@@ -603,6 +606,7 @@ def get_admin_riwayat_detail(id: int, user=Depends(get_current_user)):
             "perkiraan_akhir_ayam": perkiraan_akhir_ayam,
             "durasi_hari": hari,
             "mape": mape,
+            "mape_harian": mape_harian,
             "catatan": row.get("catatan", "")
         }
 
@@ -831,6 +835,7 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
 
         activity = data.get("activity") or f"Prediksi {mode_prediksi} dari {tanggal_mulai.date()} sampai {tanggal_selesai.date()}"
         mape = data.get("mape") or None
+        mape_harian = float(data.get("mape_harian") or 0) 
         is_active = bool(data.get("is_active", False))
 
         cursor.execute(
@@ -838,7 +843,7 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
         INSERT INTO riwayat
         (user_id, tanggal_mulai, tanggal_selesai, durasi, prediksi, data_aktual,
         total_pakan_kg, total_karung, mode_prediksi, jumlah_ayam_awal, activity,
-        mape, asal_data, nama_file, is_active, created_at, updated_at)
+        mape, mape_harian, asal_data, nama_file, is_active, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
         """,
         (
@@ -854,14 +859,36 @@ async def simpan_riwayat(data: dict, current_user: dict = Depends(get_current_us
             jumlah_ayam_awal_db,
             activity,
             mape,
+            mape_harian,
             asal_data,
             nama_file,
-            is_active 
+            is_active
         )
     )
+
         conn.commit()
         riwayat_id = cursor.lastrowid
-        return {"message": "Riwayat berhasil disimpan", "riwayat_id": riwayat_id}
+
+        # Ambil kembali data lengkap yang baru disimpan
+        cursor.execute("SELECT * FROM riwayat WHERE id=%s", (riwayat_id,))
+        row = cursor.fetchone()
+
+        return {
+            "message": "Riwayat berhasil disimpan",
+            "riwayat": {
+                "id": riwayat_id,
+                "tanggal_mulai": tanggal_mulai.strftime("%Y-%m-%d"),
+                "tanggal_selesai": tanggal_selesai.strftime("%Y-%m-%d"),
+                "mode_prediksi": mode_prediksi,
+                "nama_file": nama_file,
+                "asal_data": asal_data,
+                "mape": float(mape or 0),
+                "mape_harian": float(mape_harian or 0),
+                "total_pakan_kg": total_pakan,
+                "total_karung": total_karung,
+            }
+        }
+
 
     except Exception as e:
         if conn:
@@ -925,8 +952,10 @@ async def get_riwayat(current_user: dict = Depends(get_current_user)):
                     ])
             total_karung = float(math.ceil(total_pakan / 50))
 
-            # --- MAPE ---
+            # --- MAPE Total & MAPE Harian ---
             mape = float(row.get("mape") or 0)
+            mape_harian = float(row.get("mape_harian") or 0)  # ✅ ambil nilai MAPE Harian
+
 
             # --- Asal data & nama file ---
             asal_data = row.get("asal_data") or "Default"
@@ -960,6 +989,7 @@ async def get_riwayat(current_user: dict = Depends(get_current_user)):
                 "total_pakan_kg": total_pakan,
                 "total_karung": total_karung,
                 "mape": mape,
+                "mape_harian": mape_harian,
                 "asal_data": asal_data,
                 "nama_file": nama_file,
                 "activity": activity,
@@ -1087,6 +1117,7 @@ async def get_riwayat_detail(id: int, current_user: dict = Depends(get_current_u
 
         # --- MAPE ---
         mape = 0
+        mape_harian = float(row.get("mape_harian") or 0)  
         if prediksi and data_aktual:
             aktual_dict = {d["x"]: d["kg"] for d in data_aktual if d["kg"] > 0}
             mapes = [
@@ -1109,6 +1140,7 @@ async def get_riwayat_detail(id: int, current_user: dict = Depends(get_current_u
             "perkiraan_akhir_ayam": perkiraan_akhir_ayam,
             "durasi_hari": durasi,
             "mape": mape,
+            "mape_harian": mape_harian,
             "catatan": row.get("catatan") or f"Mode prediksi {mode_prediksi} menggunakan input jumlah ayam awal ({jumlah_ayam_awal_display} ekor)."
         }
 
@@ -1366,7 +1398,7 @@ def simpan_riwayat(user_id, tanggal_mulai, durasi, jumlah_ayam_awal, hasil_predi
                 durasi,
                 json.dumps(hasil_prediksi),
                 total_karung,
-                int(is_active)  # ✅ simpan sebagai 0/1
+                int(is_active)  
             )
             cursor.execute(sql, val)
             conn.commit()
@@ -1576,8 +1608,8 @@ def prediksi_harian(series, jumlah_ayam, tanggal_index=None, smooth_window=3, de
         print(f"Parameter ARIMA terpilih: {model.order if model else '-'}")
         print(f"MAPE total keseluruhan : {mape_total_keseluruhan:.2f}%")
         print("Forecast vs Aktual (sample 10):")
-        for i in range(min(10, len(total_prediksi))):
-            print(f"{series.index[i].date()} | Prediksi: {total_prediksi[i]:.1f} kg | Aktual: {actual_values[i]:.1f} kg | Selisih: {total_prediksi[i]-actual_values[i]:.1f}")
+        for i in range(min(10, len(total_prediksi))): actual_value = series.iloc[i]
+        print(f"{series.index[i].date()} | Prediksi: {total_prediksi[i]:.1f} kg | Aktual: {actual_value:.1f} kg | Selisih: {total_prediksi[i]-actual_value:.1f}")
         print("="*60)
 
     return data_prediksi, total_kg, total_karung, mape_total_keseluruhan, model, total_prediksi, series
@@ -2140,6 +2172,32 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
                     mape = min(mape, 100)
         else:
             mape = None
+            
+            
+        # --- Hitung MAPE harian rata-rata ---
+        aktual_col = "pakan_pakai"
+
+        # Gabungkan prediksi dan aktual berdasarkan tanggal
+        df_pred = pd.DataFrame(data_prediksi)
+        df_pred.set_index("x", inplace=True)
+
+        df_aktual = df_aktual_periode.copy()
+        df_aktual.index = df_aktual.index.strftime("%Y-%m-%d")
+
+        df_merge = df_pred.join(df_aktual, how="inner")
+
+        mape_harian_list = []
+        for idx, row in df_merge.iterrows():
+            pred = row['kg']
+            act = row[aktual_col]
+            act_safe = max(act, 50)  # hindari pembagian nol
+            mape_harian_list.append(abs(pred - act) / act_safe * 100)
+
+        if len(mape_harian_list) > 0:
+            mape_harian = round(sum(mape_harian_list) / len(mape_harian_list), 3)
+        else:
+            mape_harian = None
+
 
         # 🔹 Print prediksi vs aktual
         print("===== DETAIL HARIAN =====")
@@ -2168,19 +2226,20 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
                     INSERT INTO riwayat
                     (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal,
                     mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung,
-                    asal_data, nama_file, activity, mape, created_at, updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
+                    asal_data, nama_file, activity, mape, mape_harian, created_at, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
                 """, (
                     user_id, tanggal_mulai_str, tanggal_selesai_str, n_periods, None,
                     mode, json.dumps(data_prediksi), json.dumps(semua_data_aktual),
                     total_pakan, total_karung, asal_data, nama_file,
                     f"Prediksi {mode} dari {tanggal_mulai_str} sampai {tanggal_selesai_str}",
-                    mape
+                    mape, mape_harian
                 ))
                 riwayat_id = cursor.lastrowid
                 conn.commit()
         finally:
             conn.close()
+
 
         summary = {
             "total_prediksi_kg": round(total_pakan, 2),
@@ -2190,6 +2249,8 @@ async def predict_periode(request: Request, current_user: dict = Depends(get_cur
             "jumlah_ayam_awal": None,
             "durasi_hari": n_periods,
             "konsumsi_harian_per_ekor": None,
+            "mape": round(mape, 2) if mape is not None else None,
+            "mape_harian": round(mape_harian, 2) if mape_harian is not None else None,
             "catatan": catatan
         }
 
@@ -2361,15 +2422,29 @@ async def predict_per_ayam(request: Request, current_user: dict = Depends(get_cu
             actual_per_ayam = (df_merge[aktual_col] / df_merge['ayam_hidup']).values
             mape_per_ayam = hitung_mape_stabil(forecast_per_ayam_values, actual_per_ayam)
 
-            # Hitung MAPE total keseluruhan
+            # --- Hitung MAPE total keseluruhan ---
             total_prediksi_keseluruhan = df_merge['kg'].sum()
             total_aktual_keseluruhan = df_merge[aktual_col].sum()
             mape_total = abs(total_prediksi_keseluruhan - total_aktual_keseluruhan) / total_aktual_keseluruhan * 100
 
+            # --- Hitung MAPE harian rata-rata ---
+            mape_harian_list = []
+            for idx, row in df_merge.iterrows():
+                pred = row['kg']
+                act = row[aktual_col]
+                act_safe = max(act, 50)  # hindari pembagian nol
+                mape_harian_list.append(abs(pred - act) / act_safe * 100)
 
+            if len(mape_harian_list) > 0:
+                mape_harian = round(sum(mape_harian_list) / len(mape_harian_list), 3)
+            else:
+                mape_harian = None
         else:
+            # Kalau tidak ada data aktual di periode itu
             mape_per_ayam = None
             mape_total = None
+            mape_harian = None
+
 
         # --- Print summary & detail harian ---
         print("\n===== SUMMARY PREDIKSI PER AYAM =====")
@@ -2406,8 +2481,8 @@ async def predict_per_ayam(request: Request, current_user: dict = Depends(get_cu
             "durasi_hari": hari,
             "konsumsi_harian_per_ekor": round(konsumsi_harian_per_ekor, 2),
             "catatan": catatan,
-            "mape_per_ayam": mape_per_ayam,
-            "mape_total": mape_total
+            "mape": round(mape_total, 2) if mape_total is not None else None,
+            "mape_harian": round(mape_harian, 2) if mape_harian is not None else None
         }
 
         riwayat_id = None
@@ -2415,24 +2490,30 @@ async def predict_per_ayam(request: Request, current_user: dict = Depends(get_cu
         try:
             with conn.cursor(buffered=True) as cursor:
                 cursor.execute("""
-                    INSERT INTO riwayat (user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal, mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung, asal_data, nama_file, activity, mape, created_at, updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
-                """, (
-                    user_id,
-                    tanggal_mulai_str,
-                    tanggal_selesai_str,
-                    hari,
-                    jumlah_ayam_awal,
-                    "per_ayam",
-                    json.dumps(hasil_prediksi),
-                    json.dumps(semua_data_aktual),
-                    total_kg,
-                    total_karung,
-                    asal_data,
-                    nama_file,
-                    f"Prediksi per_ayam {tanggal_mulai_str} s/d {tanggal_selesai_str}",
-                    mape_total
-                ))
+                INSERT INTO riwayat (
+                    user_id, tanggal_mulai, tanggal_selesai, durasi, jumlah_ayam_awal, 
+                    mode_prediksi, prediksi, data_aktual, total_pakan_kg, total_karung, 
+                    asal_data, nama_file, activity, mape, mape_harian, created_at, updated_at
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())
+            """, (
+                user_id,
+                tanggal_mulai_str,
+                tanggal_selesai_str,
+                hari,
+                jumlah_ayam_awal,
+                "per_ayam",
+                json.dumps(hasil_prediksi),
+                json.dumps(semua_data_aktual),
+                total_kg,
+                total_karung,
+                asal_data,
+                nama_file,
+                f"Prediksi per_ayam {tanggal_mulai_str} s/d {tanggal_selesai_str}",
+                mape_total,
+                mape_harian
+            ))
+
                 riwayat_id = cursor.lastrowid
                 conn.commit()
         finally:

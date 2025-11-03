@@ -73,6 +73,7 @@ def init_db() -> None:
             total_pakan_kg FLOAT DEFAULT 0,  -- total pakan dalam kg
             total_karung FLOAT DEFAULT 0,
             mape FLOAT NULL,
+            mape_harian FLOAT NULL,
             asal_data VARCHAR(50) NULL,
             nama_file VARCHAR(50) NULL,
             satuan VARCHAR(10) DEFAULT 'kg',

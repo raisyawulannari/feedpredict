@@ -77,14 +77,27 @@
       <template v-if="summary && summary.total_prediksi_kg">
         <table class="summary-table">
           <tbody>
-            <!-- <tr>
-              <th>Rata-rata Error (MAPE)</th>
+            <tr>
+              <th>Rata-rata Error (MAPE per Hari)</th>
+              <td>
+                <span :style="{ color: mapeHarianWarna, fontWeight: 'bold' }">{{ mape_harian }}%</span>
+                ➜ Akurasi Harian:
+                <span :style="{ color: mapeHarianWarna, fontWeight: 'bold' }">
+                  {{ mape_harianInterpretasi }}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <th>MAPE Total</th>
               <td>
                 <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mape }}%</span>
-                ➜ Akurasi:
+                ➜ Akurasi Total:
                 <span :style="{ color: mapeWarna, fontWeight: 'bold' }">{{ mapeInterpretasi }}</span>
               </td>
-            </tr> -->
+            </tr>
+
+
+
             <tr>
               <th>Total Pakan</th>
               <td>{{ Math.round(summary.total_prediksi_kg).toLocaleString('id-ID') }} kg</td>
@@ -198,22 +211,36 @@ export default {
     mape() {
       return this.summary?.mape?.toFixed(2) ?? "0.00";
     },
-    
+    mape_harian() {
+      return this.summary?.mape_harian?.toFixed(2) ?? "0.00";
+    },
+
     mapeInterpretasi() {
-      const nilai = parseFloat(this.mape);
-      if (nilai < 10) return "Sangat Baik";
-      else if (nilai < 20) return "Baik";
-      else if (nilai < 50) return "Cukup";
-      return "Buruk";
-    },
+  const nilai = parseFloat(this.mape);
+  if (nilai < 20) return "Baik";
+  return "Extreme";
+},
+mape_harianInterpretasi() {
+  const nilai = parseFloat(this.mape_harian);
+  if (nilai < 20) return "Baik";
+  return "Extreme";
+},
+
     mapeWarna() {
-      const nilai = parseFloat(this.mape);
-      if (nilai < 10) return "green";
-      else if (nilai < 20) return "black";
-      else if (nilai < 50) return "black";
-      return "black";
-    },
+  const nilai = parseFloat(this.mape);
+  if (isNaN(nilai)) return "black";
+  return nilai < 20 ? "green" : "#5D4037"; // coklat tua
+},
+mapeHarianWarna() {
+  const nilai = parseFloat(this.mape_harian);
+  if (isNaN(nilai)) return "black";
+  return nilai < 20 ? "green" : "#5D4037"; // coklat tua
+}
+
+
+
   },
+
 
   watch: {
     file_id(newVal) {
@@ -403,14 +430,16 @@ export default {
 
         // --- Summary disesuaikan per mode ---
         this.summary = {
-  ...apiSummary,
-  mape: apiSummary.mape, // 🔥 ini wajib dibawa biar kebaca di computed
-  jumlah_ayam_awal: this.mode === 'per_ayam' ? apiSummary.jumlah_ayam_awal : undefined,
-  perkiraan_akhir_ayam: this.mode === 'per_ayam' ? apiSummary.perkiraan_akhir_ayam : undefined,
-  rata_per_ayam_kg_per_hari: this.mode === 'per_ayam' ? apiSummary.konsumsi_harian_per_ekor : undefined,
-  prediksi_jumlah_ayam: this.mode === 'per_periode' ? apiSummary.prediksi_jumlah_ayam : undefined,
-  catatan: apiSummary.catatan || ""
-};
+          ...apiSummary,
+          jumlah_ayam_awal: this.mode === 'per_ayam' ? apiSummary.jumlah_ayam_awal || this.jumlah_ayam_awal : undefined,
+          perkiraan_akhir_ayam: this.mode === 'per_ayam' ? apiSummary.perkiraan_akhir_ayam : undefined,
+          rata_per_ayam_kg_per_hari: this.mode === 'per_ayam' ? apiSummary.konsumsi_harian_per_ekor : undefined,
+          prediksi_jumlah_ayam: this.mode === 'per_periode' ? apiSummary.prediksi_jumlah_ayam : undefined,
+          catatan: apiSummary.catatan || ""
+        };
+
+
+
 
 
         // --- Simpan riwayat ke backend jika valid ---
@@ -479,8 +508,10 @@ export default {
           prediksi: prediksiStandar,
           data_aktual: aktualStandar,
           activity: `Prediksi ${this.mode} dari ${this.tanggal_mulai} sampai ${this.tanggal_selesai}`,
-          mape: this.summary?.mape || null
+          mape: this.summary?.mape || null,
+          mape_harian: this.summary?.mape_harian || null
         };
+
 
         await api.post("/riwayat", payload);
         console.log("✅ Riwayat berhasil disimpan!");

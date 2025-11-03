@@ -16,6 +16,7 @@
           <th>Total Pakan (kg)</th>
           <th>Total Karung (50kg)</th>
           <th>MAPE</th>
+          <th>MAPE Harian</th>
           <th>Asal Data</th>
           <th>Nama File</th>
           <th>Created At</th>
@@ -39,6 +40,10 @@
           <td class="text-center" :class="mapeClass(item.mape)">
             {{ item.mape != null ? formatPersen(item.mape) : '-' }}
           </td>
+          <td class="text-center" :class="mapeClass(item.mape_harian)">
+            {{ item.mape_harian != null ? formatPersen(item.mape_harian) : '-' }}
+          </td>
+
           <td class="text-center">{{ formatAsalData(item.asal_data) }}</td>
           <td class="text-center">{{ item.asal_data === 'User Upload' ? item.nama_file : 'Default' }}</td>
           <td class="text-center">{{ formatTanggal(item.created_at) }}</td>
@@ -61,13 +66,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+// import { ref, onMounted } from 'vue'
+import { ref, onMounted, onActivated } from 'vue'
 import { RouterLink } from 'vue-router'
 import axios from '@/plugins/axios.js'
 
 const riwayat = ref([])
 
 onMounted(() => {
+  loadRiwayat()
+})
+
+onActivated(() => {
   loadRiwayat()
 })
 
@@ -100,6 +110,7 @@ async function loadRiwayat() {
         prediksi: prediksiArray,
         data_aktual: aktualArray,
         mape: item.mape != null ? Number(item.mape) : null,
+        mape_harian: item.mape_harian != null ? Number(item.mape_harian) : null,
         total_karung: totalKarung,
         total_pakan_kg: totalPakanKg
       }
@@ -155,7 +166,10 @@ function formatTanggal(value) {
 
 function formatAngka(value) { return value == null ? '-' : value.toLocaleString('id-ID') }
 function formatPersen(value) { return value == null ? '-' : value.toFixed(2) + '%' }
-function mapeClass(mape) { return mape < 10 ? 'mape-baik' : mape < 20 ? 'mape-cukup' : 'mape-buruk' }
+function mapeClass(mape) {
+  if (mape == null || isNaN(mape)) return ''
+  return mape < 20 ? 'mape-hijau' : 'mape-coklat'
+}
 function formatAsalData(value) { return value === 'User Upload' ? 'Upload' : 'Default' }
 </script>
 
@@ -235,18 +249,6 @@ function formatAsalData(value) { return value === 'User Upload' ? 'Upload' : 'De
   opacity: 0.9;
 }
 
-.mape-baik {
-  color: green;
-}
-
-.mape-cukup {
-  color: black;
-}
-
-.mape-buruk {
-  color: black;
-}
-
 .btn-aktifkan {
   background-color: #2a9d8f;
   color: white;
@@ -256,6 +258,16 @@ function formatAsalData(value) { return value === 'User Upload' ? 'Upload' : 'De
   cursor: pointer;
 }
 
+.mape-hijau {
+  color: green; /* jika <20 */
+  font-weight: 500;
+}
+
+.mape-coklat {
+  color: #8B4513; /* coklat tua jika >=20 */
+  font-weight: 500;
+}
+
 .btn-aktifkan:hover {
   opacity: 0.9;
 }
@@ -263,5 +275,10 @@ function formatAsalData(value) { return value === 'User Upload' ? 'Upload' : 'De
 .aktif-label {
   color: green;
   font-weight: bold;
+}
+
+.mape-harian {
+  color: #0077b6;
+  font-weight: 500;
 }
 </style>
